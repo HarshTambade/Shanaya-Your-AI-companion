@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const cors = require("cors");
 const express = require("express");
-const Groq = require("groq-sdk");
+const CloudAIClient = require("groq-sdk");
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -10,9 +10,10 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capa
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
-const groqModels = (
-  process.env.GROQ_MODEL_FALLBACKS ||
+const cloudApiKey = process.env.CLOUD_API_KEY || process.env.GROQ_API_KEY;
+const cloudClient = cloudApiKey ? new CloudAIClient({ apiKey: cloudApiKey }) : null;
+const cloudModels = (
+  process.env.CLOUD_MODEL_FALLBACKS ||
   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b"].join(",")
 )
   .split(",")
@@ -69,13 +70,13 @@ function parseAssistantOutput(content) {
   return { reply: content.trim(), emotion: "neutral" };
 }
 
-async function requestGroq(messages) {
-  if (!groq) throw new Error("Add GROQ_API_KEY to server/.env to use Groq Cloud.");
+async function requestCloud(messages) {
+  if (!cloudClient) throw new Error("Add CLOUD_API_KEY to server/.env to enable Cloud AI.");
 
   let lastError;
-  for (const model of groqModels) {
+  for (const model of cloudModels) {
     try {
-      const completion = await groq.chat.completions.create({
+      const completion = await cloudClient.chat.completions.create({
         model,
         messages: [{ role: "system", content: systemPrompt }, ...messages],
         response_format: { type: "json_object" },
@@ -87,10 +88,10 @@ async function requestGroq(messages) {
       lastError = new Error(`${model} returned an empty response.`);
     } catch (error) {
       lastError = error;
-      console.warn(`Groq model ${model} failed; trying the next configured model.`);
+      console.warn(`Cloud model ${model} failed; trying the next configured model.`);
     }
   }
-  throw lastError || new Error("No Groq models are configured.");
+  throw lastError || new Error("No cloud models are configured.");
 }
 
 async function requestOllama(messages) {
@@ -114,9 +115,9 @@ async function requestOllama(messages) {
 }
 
 app.post("/api/chat", async (req, res) => {
-  const { messages, mode = "groq" } = req.body || {};
-  if (mode !== "groq" && mode !== "ollama") {
-    return res.status(400).json({ error: "mode must be either groq or ollama; WebLLM runs directly in the browser." });
+  const { messages, mode = "cloud" } = req.body || {};
+  if (mode !== "cloud" && mode !== "ollama") {
+    return res.status(400).json({ error: "mode must be either cloud or ollama; local inference runs directly in the client." });
   }
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 40) {
     return res.status(400).json({ error: "messages must be an array containing 1 to 40 messages." });
@@ -139,15 +140,15 @@ app.post("/api/chat", async (req, res) => {
     const normalizedMessages = messages.map(({ role, content }) => ({ role, content: content.trim() }));
     const result = mode === "ollama"
       ? await requestOllama(normalizedMessages)
-      : await requestGroq(normalizedMessages);
+      : await requestCloud(normalizedMessages);
     if (!result.reply) return res.status(502).json({ error: "The AI returned an empty response. Please try again." });
     return res.json(result);
   } catch (error) {
     console.error(`${mode} chat request failed:`, error.message);
     const message = mode === "ollama"
       ? "Could not reach your Ollama server. Check that it is running and that OLLAMA_BASE_URL is correct."
-      : "Groq could not respond using the configured model fallback chain. Check the API key and model access.";
-    return res.status(mode === "groq" && !groq ? 503 : 502).json({ error: message });
+      : "Cloud AI could not respond using the configured model fallback chain. Check the API key and model access.";
+    return res.status(mode === "cloud" && !cloudClient ? 503 : 502).json({ error: message });
   }
 });
 

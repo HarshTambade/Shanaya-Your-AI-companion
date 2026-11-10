@@ -28,7 +28,7 @@ const welcomeMessage: ChatMessage = {
 };
 
 const modeDetails: Record<InferenceMode, { label: string; description: string; icon: typeof Globe2 }> = {
-  groq: { label: "Groq Cloud", description: "Fast hosted inference", icon: Globe2 },
+  cloud: { label: "Cloud AI", description: "Fast hosted responses", icon: Globe2 },
   webllm: { label: "WebLLM Local", description: "Runs in this browser with WebGPU", icon: Cpu },
   ollama: { label: "Local Ollama", description: "Uses your configured Ollama server", icon: HardDrive },
   native: { label: "On-device AI", description: "Uses Apple Intelligence or Gemini Nano", icon: Smartphone },
@@ -77,7 +77,7 @@ type ChatUIProps = {
 export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<InferenceMode>("groq");
+  const [mode, setMode] = useState<InferenceMode>("cloud");
   const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>("en-US");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
@@ -266,7 +266,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       : true;
 
   return (
-    <section className="relative mx-auto flex max-h-[56dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[26px] border border-white/10 bg-[#0b0e17]/75 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+    <section className="relative mx-auto flex max-h-[48dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[26px] border border-white/10 bg-[#0b0e17]/75 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
       <header className="flex shrink-0 items-center justify-between border-b border-white/[0.07] px-4 py-3 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-300/20 bg-violet-400/[0.1] text-violet-200">
@@ -367,8 +367,8 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               </div>
               <p className="text-[11px] leading-relaxed text-slate-500">
                 {!isOnline
-                  ? "Offline messages are routed to the on-device model; no AI request is sent to Groq or Ollama. Native speech uses an installed offline system voice."
-                  : "WebLLM and native inference process prompts locally. Ollama sends prompts to its configured endpoint. Groq sends prompts to Groq; its retention settings are controlled in your Groq account. Voice calls use Pinecall over the internet. The native speech plugin uses installed OS voices; Mithi/Charvi needs a separate native model runtime."}
+                  ? "Offline messages are routed to the on-device model; no AI request is sent to a cloud service or Ollama. Native speech uses an installed offline system voice."
+                  : "WebLLM and native inference process prompts locally. Ollama sends prompts to its configured endpoint. Cloud AI sends prompts to our configured cloud service; its provider retention policy applies. Voice calls use Pinecall over the internet. The native speech plugin uses installed OS voices; Mithi/Charvi needs a separate native model runtime."}
               </p>
             </div>
           </div>
@@ -497,8 +497,8 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
           </button>
         </form>
         <p className="mt-1.5 text-center text-[9px] text-slate-500">
-          {effectiveMode === "groq"
-            ? "Groq Cloud · retention follows your Groq account settings"
+          {effectiveMode === "cloud"
+            ? "Cloud AI · provider retention policy applies"
             : effectiveMode === "ollama"
               ? "Ollama · prompts go to your configured endpoint"
               : "On-device inference · messages stay on this device"}

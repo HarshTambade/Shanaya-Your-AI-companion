@@ -74,6 +74,32 @@ textarea {
   animation-delay: 240ms;
 }
 
+.avatar-emotion-bubble {
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border: 1px solid rgba(221, 214, 254, 0.28);
+  border-radius: 9999px;
+  background: rgba(15, 18, 31, 0.76);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32), 0 0 24px rgba(167, 139, 250, 0.2);
+  font-size: 1.35rem;
+  backdrop-filter: blur(14px);
+  animation: avatar-emotion-pop 520ms cubic-bezier(0.2, 0.9, 0.25, 1.2), avatar-emotion-float 3s ease-in-out 520ms infinite;
+  pointer-events: none;
+}
+
+@keyframes avatar-emotion-pop {
+  from { opacity: 0; scale: 0.55; }
+  to { opacity: 1; scale: 1; }
+}
+
+@keyframes avatar-emotion-float {
+  0%,
+  100% { translate: 0 0; }
+  50% { translate: 0 -5px; }
+}
+
 @keyframes typing {
   0%,
   60%,

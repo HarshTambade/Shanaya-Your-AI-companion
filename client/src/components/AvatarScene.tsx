@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { Box3, Group, Mesh, Vector3 } from "three";
+import { Box3, Group, MathUtils, Mesh, Vector3 } from "three";
 import type { Emotion } from "../types";
 
 const emotionMorphs: Record<Emotion, string[]> = {
@@ -31,6 +31,15 @@ const emotionIcon: Record<Emotion, string> = {
   thinking: "💭",
 };
 
+const emotionPose: Record<Emotion, { lean: number; turn: number; tilt: number; bounce: number }> = {
+  happy: { lean: -0.025, turn: 0.08, tilt: -0.025, bounce: 0.09 },
+  sad: { lean: 0.09, turn: -0.04, tilt: 0.035, bounce: -0.04 },
+  angry: { lean: -0.035, turn: 0.025, tilt: -0.055, bounce: 0.015 },
+  neutral: { lean: 0, turn: 0, tilt: 0, bounce: 0 },
+  surprised: { lean: -0.075, turn: 0, tilt: 0, bounce: 0.12 },
+  thinking: { lean: -0.025, turn: -0.16, tilt: 0.045, bounce: 0.01 },
+};
+
 function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   const aliases = emotionMorphs[emotion];
   scene.traverse((object) => {
@@ -49,10 +58,12 @@ function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
 function Avatar({ emotion }: { emotion: Emotion }) {
   const { scene, animations } = useGLTF("/models/avatar.glb");
   const group = useRef<Group>(null);
+  const emotionPulse = useRef(0);
   const { actions } = useAnimations(animations, group);
 
   useEffect(() => {
     applyEmotionMorph(scene, emotion);
+    emotionPulse.current = 0;
   }, [emotion, scene]);
 
   const framing = useMemo(() => {
@@ -62,6 +73,7 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     const scale = size.y > 0 ? 3.15 / size.y : 1;
     return {
       scale,
+      sourceHeight: size.y,
       position: [-center.x * scale, -bounds.min.y * scale, -center.z * scale] as [number, number, number],
     };
   }, [scene]);
@@ -74,16 +86,35 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     };
   }, [actions, animations]);
 
-  useFrame(({ clock }) => {
-    if (!animations.length && group.current) {
-      group.current.position.y = framing.position[1] + Math.sin(clock.elapsedTime * 1.1) * 0.035;
-    }
+  useFrame(({ clock }, delta) => {
+    if (!group.current) return;
+
+    // The GLB has no embedded animation or morph targets, so give it a gentle idle
+    // and emotion-specific body language. Keep the floor correction on the inner
+    // model group; applying it here as well was lifting the avatar out of frame.
+    emotionPulse.current += delta;
+    const pulse = Math.exp(-emotionPulse.current * 3.2);
+    const pose = emotionPose[emotion];
+    const time = clock.elapsedTime;
+    const avatar = group.current;
+
+    avatar.position.y = Math.sin(time * 1.55) * 0.018 + pose.bounce * pulse;
+    avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.45) * 0.012, 3.5, delta);
+    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.3) * 0.035, 2.8, delta);
+    avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.65) * 0.012, 3.5, delta);
+    const scale = 1 + (emotion === "surprised" ? 0.035 : 0.012) * pulse;
+    avatar.scale.setScalar(MathUtils.damp(avatar.scale.x, scale, 4, delta));
   });
 
   return (
     <group ref={group}>
       <group position={framing.position} scale={framing.scale}>
         <primitive object={scene} />
+        <Html position={[0.42, framing.sourceHeight * 0.9, 0.12]} center distanceFactor={7} zIndexRange={[20, 0]}>
+          <div key={emotion} className="avatar-emotion-bubble" aria-label={`Shanaya feels ${emotion}`} title={emotion}>
+            {emotionIcon[emotion]}
+          </div>
+        </Html>
       </group>
     </group>
   );
@@ -106,7 +137,7 @@ function SceneLoader() {
 export default function AvatarScene({ emotion }: { emotion: Emotion }) {
   return (
     <div className="relative h-full w-full">
-      <Canvas camera={{ position: [0, 1.5, 4.8], fov: 34 }} dpr={[1, 1.75]} gl={{ alpha: true, antialias: true }}>
+      <Canvas camera={{ position: [0, 1.4, 5.4], fov: 35 }} dpr={[1, 1.75]} gl={{ alpha: true, antialias: true }}>
         <ambientLight intensity={1.8} />
         <directionalLight position={[3, 5, 4]} intensity={3.1} color="#fff2df" />
         <directionalLight position={[-4, 2, -3]} intensity={2.2} color="#a6a5ff" />
@@ -116,11 +147,11 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
           <Environment preset="studio" />
         </Suspense>
         <OrbitControls
-          target={[0, 1.15, 0]}
+          target={[0, 1.58, 0]}
           enablePan={false}
           enableDamping
           dampingFactor={0.08}
-          minDistance={2.2}
+          minDistance={3.4}
           maxDistance={7}
           minPolarAngle={Math.PI / 3.4}
           maxPolarAngle={Math.PI / 1.9}
