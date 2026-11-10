@@ -130,7 +130,7 @@ export async function generateOfflineReply(messages: ChatMessage[]) {
     n_predict: 512,
     temperature: 0.3,
   });
-  const text = "content" in result ? result.content : result.text;
+  const text = result.content || result.text;
   if (typeof text !== "string" || !text.trim()) throw new Error("The on-device model returned an empty response.");
   return text;
 }

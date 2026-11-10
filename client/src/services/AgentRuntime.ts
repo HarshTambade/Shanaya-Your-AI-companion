@@ -86,7 +86,7 @@ export async function runAgentTurn(options: {
   const tools = [...getDeviceTools()];
   let memoryToolsLoaded = false;
   const conversation: AgentMessage[] = options.messages
-    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message): message is ChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
     .map(({ role, content }) => ({ role, content }));
 
   for (let turn = 0; turn < maxToolTurns; turn += 1) {

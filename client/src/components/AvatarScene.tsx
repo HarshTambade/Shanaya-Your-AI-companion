@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment, Html, OrbitControls, Stats, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { Box3, FloatType, Group, HalfFloatType, MathUtils, Mesh, Object3D, RedFormat, RGBAFormat, RGBFormat, RGFormat, Texture, Vector3 } from "three";
-import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { Box3, FloatType, Group, HalfFloatType, MathUtils, Mesh, RedFormat, RGBAFormat, RGBFormat, RGFormat, Scene, Texture, Vector3 } from "three";
+import { DRACOLoader } from "three-stdlib";
 import type { Emotion } from "../types";
 
 const emotionMorphs: Record<Emotion, string[]> = {
@@ -129,7 +129,7 @@ const drawCallBudget = 150;
 const textureCountBudget = 64;
 const textureMemoryBudgetBytes = 128 * 1024 * 1024;
 
-function estimateTextureMemory(scene: Object3D) {
+function estimateTextureMemory(scene: Scene) {
   const textures = new Set<Texture>();
   const textureSlots = [
     "map", "alphaMap", "aoMap", "bumpMap", "displacementMap", "emissiveMap", "envMap",

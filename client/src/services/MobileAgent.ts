@@ -39,12 +39,15 @@ function initialize() {
       }
       const allowedToolNames = new Set(tools.map((tool) => tool.name));
       engine.addListener("toolPreExecute", (event) => {
-        if (!("toolCallId" in event)) return;
-        const toolName = "toolName" in event ? event.toolName : "";
+        if (!("toolCallId" in event) || typeof event.toolCallId !== "string") return;
+        const toolName = "toolName" in event && typeof event.toolName === "string" ? event.toolName : "";
+        const args = "args" in event && event.args && typeof event.args === "object" && !Array.isArray(event.args)
+          ? event.args as Record<string, unknown>
+          : {};
         const allowed = allowedToolNames.has(toolName);
         void engine.respondToPreExecute(
           event.toolCallId,
-          "args" in event ? event.args : {},
+          args,
           !allowed,
           allowed ? undefined : "This tool is not allowlisted for Shanaya.",
         ).catch(() => undefined);
@@ -96,10 +99,11 @@ export async function runMobileAgentTurn(prompt: string, onActivity: (message: s
     errorHandler = engine.addListener("agentError", (event) => reject(new Error("error" in event ? String(event.error) : "The native agent failed.")));
     eventHandler = engine.addListener("agentEvent", (event) => {
       if (!("eventType" in event)) return;
-      if (event.eventType === "text_delta") output += String(event.data.text ?? "");
-      if (event.eventType === "tool_use") onActivity(`Using ${String(event.data.name ?? event.data.tool_name ?? event.data.toolName ?? "a device tool")}…`, true);
+      const data = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
+      if (event.eventType === "text_delta") output += String(data.text ?? "");
+      if (event.eventType === "tool_use") onActivity(`Using ${String(data.name ?? data.tool_name ?? data.toolName ?? "a device tool")}…`, true);
       if (event.eventType === "tool_result") {
-        const result = event.data.result ?? event.data;
+        const result = data.result ?? data;
         onActivity(typeof result === "string" ? result : JSON.stringify(result) ?? "Device action finished.", false);
       }
       if (event.eventType === "thinking") onActivity("Shanaya is thinking…", false);

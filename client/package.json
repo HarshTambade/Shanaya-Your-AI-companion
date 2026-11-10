@@ -46,6 +46,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "three": "^0.172.0",
+    "three-stdlib": "^2.36.1",
     "use-browser-llm": "^0.1.2"
   },
   "devDependencies": {
