@@ -1,6 +1,5 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
-import { LocalLLM } from "@capacitor/local-llm";
 import { useBrowserLLM } from "use-browser-llm";
 import { useCallClient } from "@pinecall/ionic/react";
 import {
@@ -9,10 +8,17 @@ import {
 } from "lucide-react";
 import type { ChatMessage, Emotion, InferenceMode, SpeechLanguage } from "../types";
 import { useConnectivity } from "../services/connectivity";
+import {
+  generateOfflineReply,
+  getOfflineModelStatus,
+  prepareOfflineModel,
+  resolveInferenceMode,
+  type OfflineModelStatus,
+} from "../services/AIService";
 import { requestCallMicrophonePermission } from "../services/callPermissions";
 import { apiUrl } from "../services/api";
-import { generateNativeReply, getNativeLLMStatus, prepareNativeLLM, type NativeLLMStatus } from "../services/nativeLLM";
 import { SpeechService } from "../services/SpeechService";
+import { VoiceService } from "../services/VoiceService";
 import { pinecallAgentId, shanayaCallClient } from "../services/callClient";
 
 const WEBLLM_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
@@ -31,7 +37,7 @@ const modeDetails: Record<InferenceMode, { label: string; description: string; i
   cloud: { label: "Cloud AI", description: "Fast hosted responses", icon: Globe2 },
   webllm: { label: "WebLLM Local", description: "Runs in this browser with WebGPU", icon: Cpu },
   ollama: { label: "Local Ollama", description: "Uses your configured Ollama server", icon: HardDrive },
-  native: { label: "On-device AI", description: "Uses Apple Intelligence or Gemini Nano", icon: Smartphone },
+  native: { label: "On-device AI", description: "Runs a downloaded llama.cpp model", icon: Smartphone },
 };
 
 function normalizeEmotion(value: unknown): Emotion {
@@ -81,16 +87,20 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>("en-US");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
+  const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [nativeStatus, setNativeStatus] = useState<NativeLLMStatus>("checking");
+  const [nativeStatus, setNativeStatus] = useState<OfflineModelStatus>("checking");
   const [isPreparingNative, setIsPreparingNative] = useState(false);
+  const [modelDownloadProgress, setModelDownloadProgress] = useState(0);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const voiceSessionRef = useRef<(() => Promise<void> | void) | null>(null);
   const isOnline = useConnectivity();
-  const isNative = Capacitor.isNativePlatform();
-  const effectiveMode: InferenceMode = !isOnline ? (isNative ? "native" : "webllm") : mode;
+  const platform = Capacitor.getPlatform();
+  const isNative = platform === "ios" || platform === "android";
+  const effectiveMode = resolveInferenceMode(mode, isOnline);
   const localLLM = useBrowserLLM(effectiveMode === "webllm" ? WEBLLM_MODEL : undefined);
   const selectedMode = modeDetails[effectiveMode];
   const call = useCallClient(shanayaCallClient);
@@ -99,33 +109,24 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const showCallPanel = call.status !== "idle" || call.messages.length > 0;
 
   const refreshNativeStatus = useCallback(async () => {
-    if (!Capacitor.isNativePlatform()) {
+    if (!isNative) {
       setNativeStatus("unavailable");
       return;
     }
     try {
-      setNativeStatus(await getNativeLLMStatus());
+      setNativeStatus(await getOfflineModelStatus());
     } catch {
       setNativeStatus("unavailable");
     }
-  }, []);
+  }, [isNative]);
 
   useEffect(() => {
     void refreshNativeStatus();
-    if (!isNative) return;
-    let active = true;
-    let listener: { remove: () => Promise<void> } | undefined;
-    void LocalLLM.addListener("systemAvailabilityChange", ({ status }) => {
-      if (active) setNativeStatus(status);
-    }).then((handle) => {
-      if (active) listener = handle;
-      else void handle.remove();
-    }).catch(() => undefined);
-    return () => {
-      active = false;
-      void listener?.remove();
-    };
-  }, [isNative, refreshNativeStatus]);
+  }, [isOnline, refreshNativeStatus]);
+
+  useEffect(() => () => {
+    void voiceSessionRef.current?.();
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -135,20 +136,21 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
     setIsPreparingNative(true);
     setError("");
     setNativeStatus("notready");
+    setModelDownloadProgress(0);
     try {
-      await prepareNativeLLM();
+      await prepareOfflineModel(setModelDownloadProgress);
       await refreshNativeStatus();
     } catch (prepareError) {
-      setError(prepareError instanceof Error ? prepareError.message : "Could not prepare the on-device model.");
+      setError(prepareError instanceof Error ? prepareError.message : "Could not download the on-device model.");
       await refreshNativeStatus();
     } finally {
       setIsPreparingNative(false);
     }
   };
 
-  const submitMessage = async (event?: FormEvent<HTMLFormElement>) => {
+  const submitMessage = async (event?: FormEvent<HTMLFormElement>, transcript?: string, speakReply = voiceEnabled) => {
     event?.preventDefault();
-    const content = input.trim();
+    const content = (transcript ?? input).trim();
     if (!content || isLoading) return;
     if (effectiveMode === "webllm" && localLLM.status !== "ready") {
       setError(localLLM.status === "unsupported" ? "WebGPU is unavailable. Reconnect or use the native app for offline AI." : "The browser model is still preparing or could not load.");
@@ -172,7 +174,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         const generated = await localLLM.generate([{ role: "system", content: systemPrompt }, ...nextMessages]);
         result = parseAIResponse(generated);
       } else if (effectiveMode === "native") {
-        result = parseAIResponse(await generateNativeReply(nextMessages));
+        result = parseAIResponse(await generateOfflineReply(nextMessages));
       } else {
         const response = await fetch(apiUrl("/api/chat"), {
           method: "POST",
@@ -186,7 +188,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
 
       setMessages([...nextMessages, { role: "assistant", content: result.reply }]);
       onEmotionChange(result.emotion);
-      if (voiceEnabled) {
+      if (speakReply) {
         void SpeechService.speak(result.reply, speechLanguage)
           .then((voiceName) => setVoiceStatus(`Speaking with ${voiceName}`))
           .catch((speechError) => setVoiceStatus(speechError instanceof Error ? speechError.message : "Offline voice unavailable."));
@@ -225,6 +227,45 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
     }
   };
 
+  const toggleVoiceInput = async () => {
+    if (isListening) {
+      try {
+        await voiceSessionRef.current?.();
+      } finally {
+        voiceSessionRef.current = null;
+        setIsListening(false);
+        setVoiceStatus("Voice input stopped");
+      }
+      return;
+    }
+
+    setError("");
+    try {
+      voiceSessionRef.current = await VoiceService.startSession(speechLanguage, (transcript, isFinal) => {
+        setInput(transcript);
+        if (isFinal) {
+          const stop = voiceSessionRef.current;
+          voiceSessionRef.current = null;
+          setIsListening(false);
+          void stop?.();
+          void submitMessage(undefined, transcript, true);
+        }
+      }, (message) => {
+        setError(message);
+        const stop = voiceSessionRef.current;
+        voiceSessionRef.current = null;
+        setIsListening(false);
+        void stop?.();
+      });
+      setIsListening(true);
+      setVoiceStatus(`Listening in ${speechLanguage} · speak to send`);
+    } catch (voiceError) {
+      voiceSessionRef.current = null;
+      setIsListening(false);
+      setError(voiceError instanceof Error ? voiceError.message : "Could not start voice input.");
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -242,14 +283,16 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   };
 
   const nativeStatusLabel = nativeStatus === "available"
-    ? "Ready on this device"
+    ? "GGUF model ready on this device"
     : nativeStatus === "downloadable"
       ? "Model needs a one-time download"
       : nativeStatus === "notready" || isPreparingNative
-        ? "Preparing the native model…"
+        ? "Preparing the on-device model…"
         : nativeStatus === "checking"
           ? "Checking device support…"
-          : "No supported native model on this device";
+          : import.meta.env.VITE_OFFLINE_MODEL_URL
+            ? "llama.cpp is available in the iOS and Android app"
+            : "Set VITE_OFFLINE_MODEL_URL to enable model download";
   const webStatusLabel = localLLM.status === "loading"
     ? `Preparing browser model · ${Math.round(localLLM.progress * 100)}%`
     : localLLM.status === "ready"
@@ -345,7 +388,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
                     disabled={isPreparingNative}
                     className="mt-2 block w-full rounded-lg bg-violet-500/20 px-3 py-2 font-medium text-violet-100 transition hover:bg-violet-500/30 disabled:opacity-50"
                   >
-                    {isPreparingNative ? "Preparing…" : "Prepare offline AI"}
+                    {isPreparingNative ? `Downloading · ${Math.round(modelDownloadProgress)}%` : "Download offline model"}
                   </button>
                 )}
               </div>
@@ -367,8 +410,8 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               </div>
               <p className="text-[11px] leading-relaxed text-slate-500">
                 {!isOnline
-                  ? "Offline messages are routed to the on-device model; no AI request is sent to a cloud service or Ollama. Native speech uses an installed offline system voice."
-                  : "WebLLM and native inference process prompts locally. Ollama sends prompts to its configured endpoint. Cloud AI sends prompts to our configured cloud service; its provider retention policy applies. Voice calls use Pinecall over the internet. The native speech plugin uses installed OS voices; Mithi/Charvi needs a separate native model runtime."}
+                  ? "Offline messages use WebLLM in browsers and a downloaded llama.cpp model in the iOS or Android app. Those prompts stay on this device. Speech input uses the platform recognizer, whose offline support varies."
+                  : "WebLLM and llama.cpp process prompts locally. Ollama sends prompts to its configured endpoint. Cloud AI sends prompts to our configured provider, whose retention policy applies. Speech input uses the platform recognizer. Voice calls use Pinecall over the internet. Speech playback uses an installed system voice for the selected language."}
               </p>
             </div>
           </div>
@@ -460,6 +503,15 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
             </button>
             {!isOnline && <span className="hidden truncate text-[10px] text-slate-500 sm:inline">On-device mode</span>}
           </div>
+          <button
+            type="button"
+            onClick={() => void toggleVoiceInput()}
+            aria-label={isListening ? "Stop voice input" : "Start voice input"}
+            title={isListening ? "Stop listening" : "Speak to Shanaya"}
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-medium transition ${isListening ? "border-rose-300/20 bg-rose-300/[0.1] text-rose-100" : "border-violet-300/15 bg-violet-300/[0.06] text-violet-100 hover:bg-violet-300/[0.12]"}`}
+          >
+            <Mic size={12} /> {isListening ? "Listening" : "Speak"}
+          </button>
           <button
             type="button"
             onClick={() => void startVoiceCall()}

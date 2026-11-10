@@ -1,0 +1,215 @@
+name: Build Shanaya
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+  VITE_OFFLINE_MODEL_URL: ${{ vars.VITE_OFFLINE_MODEL_URL }}
+
+jobs:
+  web:
+    name: Web and PWA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+        working-directory: client
+      - run: npm run models:draco
+        working-directory: client
+      - run: npm run build
+        working-directory: client
+        env:
+          VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shanaya-web-pwa
+          path: client/dist
+
+  electron:
+    name: Electron (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+        working-directory: client
+      - run: npm run models:draco
+        working-directory: client
+      - run: npm run build
+        working-directory: client
+        env:
+          VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
+      - run: npx cap add @capawesome/capacitor-electron
+        working-directory: client
+      - run: npm install
+        working-directory: client/electron
+      - run: npx cap sync @capawesome/capacitor-electron
+        working-directory: client
+      - run: npm run pack
+        working-directory: client/electron
+        env:
+          CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || runner.os == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shanaya-electron-${{ matrix.os }}
+          path: client/electron/dist/**
+          if-no-files-found: error
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "ndk;29.0.13113456" "cmake;3.22.1"
+      - run: npm ci
+        working-directory: client
+      - run: npm run models:draco
+        working-directory: client
+      - run: npm run build
+        working-directory: client
+        env:
+          VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
+      - run: npx cap add android
+        working-directory: client
+      - run: npx cap sync android
+        working-directory: client
+      - name: Build Android package
+        working-directory: client/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/shanaya-release.keystore"
+            ./gradlew assembleRelease \
+              -Pandroid.injected.signing.store.file="$RUNNER_TEMP/shanaya-release.keystore" \
+              -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+              -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+              -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+          else
+            ./gradlew assembleDebug
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shanaya-android
+          path: client/android/app/build/outputs/apk/**/*.apk
+
+  ios:
+    name: iOS
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+        working-directory: client
+      - run: npm run models:draco
+        working-directory: client
+      - run: npm run build
+        working-directory: client
+        env:
+          VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
+      - run: npx cap add ios
+        working-directory: client
+      - run: cp config/PrivacyInfo.xcprivacy ios/App/App/PrivacyInfo.xcprivacy
+        working-directory: client
+      - name: Add iOS privacy manifest to app target
+        working-directory: client
+        run: |
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          project = Xcodeproj::Project.open('ios/App/App.xcodeproj')
+          target = project.targets.find { |candidate| candidate.name == 'App' }
+          raise 'Capacitor App target not found' unless target
+          app_group = project.main_group.children.find { |child| child.path == 'App' || child.name == 'App' }
+          raise 'Capacitor App group not found' unless app_group
+          file = app_group.files.find { |candidate| candidate.path == 'PrivacyInfo.xcprivacy' } || app_group.new_file('PrivacyInfo.xcprivacy')
+          target.resources_build_phase.add_file_reference(file)
+          project.save
+          RUBY
+      - name: Add iOS speech permission descriptions
+        working-directory: client
+        run: |
+          INFO=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c 'Set :NSMicrophoneUsageDescription Shanaya uses the microphone to transcribe voice messages.' "$INFO" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c 'Add :NSMicrophoneUsageDescription string Shanaya uses the microphone to transcribe voice messages.' "$INFO"
+          /usr/libexec/PlistBuddy -c 'Set :NSSpeechRecognitionUsageDescription Shanaya uses speech recognition to transcribe voice messages.' "$INFO" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c 'Add :NSSpeechRecognitionUsageDescription string Shanaya uses speech recognition to transcribe voice messages.' "$INFO"
+      - run: npx cap sync ios
+        working-directory: client
+      - name: Import Apple signing certificate
+        if: vars.IOS_SIGNING_ENABLED == 'true'
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      - name: Install provisioning profile
+        if: vars.IOS_SIGNING_ENABLED == 'true'
+        uses: apple-actions/download-provisioning-profiles@v7
+        with:
+          profile-type: IOS_APP_STORE
+          bundle-id: com.shanaya.companion
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      - name: Archive iOS app
+        run: |
+          if [ "${{ vars.IOS_SIGNING_ENABLED }}" = "true" ]; then
+            SIGNING_ALLOWED=YES
+          else
+            SIGNING_ALLOWED=NO
+          fi
+          xcodebuild \
+            -workspace client/ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Shanaya.xcarchive" \
+            CODE_SIGNING_ALLOWED="$SIGNING_ALLOWED" \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shanaya-ios-archive
+          path: ${{ runner.temp }}/Shanaya.xcarchive

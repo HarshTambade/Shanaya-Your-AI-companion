@@ -1,7 +1,8 @@
-import { Suspense, useEffect, useMemo, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Environment, Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { Box3, Group, MathUtils, Mesh, Vector3 } from "three";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Environment, Html, OrbitControls, Stats, useAnimations, useGLTF, useProgress } from "@react-three/drei";
+import { Box3, FloatType, Group, HalfFloatType, MathUtils, Mesh, Object3D, RedFormat, RGBAFormat, RGBFormat, RGFormat, Texture, Vector3 } from "three";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import type { Emotion } from "../types";
 
 const emotionMorphs: Record<Emotion, string[]> = {
@@ -40,6 +41,10 @@ const emotionPose: Record<Emotion, { lean: number; turn: number; tilt: number; b
   thinking: { lean: -0.025, turn: -0.16, tilt: 0.045, bounce: 0.01 },
 };
 
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath("/draco/");
+const avatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim() || "/models/avatar.glb";
+
 function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   const aliases = emotionMorphs[emotion];
   scene.traverse((object) => {
@@ -56,7 +61,7 @@ function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
 }
 
 function Avatar({ emotion }: { emotion: Emotion }) {
-  const { scene, animations } = useGLTF("/models/avatar.glb");
+  const { scene, animations } = useGLTF(avatarModelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
   const group = useRef<Group>(null);
   const emotionPulse = useRef(0);
   const { actions } = useAnimations(animations, group);
@@ -120,6 +125,108 @@ function Avatar({ emotion }: { emotion: Emotion }) {
   );
 }
 
+const drawCallBudget = 150;
+const textureCountBudget = 64;
+const textureMemoryBudgetBytes = 128 * 1024 * 1024;
+
+function estimateTextureMemory(scene: Object3D) {
+  const textures = new Set<Texture>();
+  const textureSlots = [
+    "map", "alphaMap", "aoMap", "bumpMap", "displacementMap", "emissiveMap", "envMap",
+    "lightMap", "metalnessMap", "normalMap", "roughnessMap", "specularMap",
+  ];
+
+  if (scene.environment?.isTexture) textures.add(scene.environment);
+  const backgroundTexture = scene.background as Texture | null;
+  if (backgroundTexture?.isTexture) textures.add(backgroundTexture);
+  scene.traverse((object) => {
+    const mesh = object as Mesh;
+    if (!mesh.isMesh) return;
+    for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
+      for (const slot of textureSlots) {
+        const texture = (material as unknown as Record<string, unknown>)[slot] as Texture | undefined;
+        if (texture?.isTexture) textures.add(texture);
+      }
+    }
+  });
+
+  let bytes = 0;
+  for (const texture of textures) {
+    const mipmaps = texture.mipmaps as Array<{ data?: ArrayBufferView }> | undefined;
+    const mipmapBytes = mipmaps?.reduce((sum, mipmap) => {
+      const data = mipmap.data;
+      return sum + (data?.byteLength ?? 0);
+    }, 0) ?? 0;
+    if (mipmapBytes > 0) {
+      bytes += mipmapBytes;
+      continue;
+    }
+
+    const estimateImageBytes = (image: unknown): number => {
+      if (Array.isArray(image)) return image.reduce((sum, face) => sum + estimateImageBytes(face), 0);
+      if (!image || typeof image !== "object") return 0;
+      const size = image as { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number; videoWidth?: number; videoHeight?: number };
+      const width = size.width ?? size.naturalWidth ?? size.videoWidth ?? 0;
+      const height = size.height ?? size.naturalHeight ?? size.videoHeight ?? 0;
+      if (!width || !height) return 0;
+      const components = texture.format === RGBAFormat ? 4 : texture.format === RGBFormat ? 3 : texture.format === RGFormat ? 2 : texture.format === RedFormat ? 1 : 4;
+      const bytesPerComponent = texture.type === FloatType ? 4 : texture.type === HalfFloatType ? 2 : 1;
+      const mipFactor = texture.generateMipmaps ? 4 / 3 : 1;
+      return width * height * components * bytesPerComponent * mipFactor;
+    };
+    bytes += estimateImageBytes(texture.image);
+  }
+  return bytes;
+}
+
+function RendererBudgetMonitor() {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const [metrics, setMetrics] = useState({ calls: 0, textures: 0, textureBytes: 0 });
+  const overDrawBudget = useRef(false);
+  const overTextureBudget = useRef(false);
+  const overMemoryBudget = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const calls = gl.info.render.calls;
+      const textures = gl.info.memory.textures;
+      const textureBytes = estimateTextureMemory(scene);
+      setMetrics({ calls, textures, textureBytes });
+
+      if (calls > drawCallBudget && !overDrawBudget.current) {
+        console.warn(`[avatar] Draw-call budget exceeded (${calls}/${drawCallBudget}).`);
+        overDrawBudget.current = true;
+      } else if (calls <= drawCallBudget) {
+        overDrawBudget.current = false;
+      }
+      if (textures > textureCountBudget && !overTextureBudget.current) {
+        console.warn(`[avatar] Texture-count budget exceeded (${textures}/${textureCountBudget}).`);
+        overTextureBudget.current = true;
+      } else if (textures <= textureCountBudget) {
+        overTextureBudget.current = false;
+      }
+      if (textureBytes > textureMemoryBudgetBytes && !overMemoryBudget.current) {
+        console.warn(`[avatar] Estimated texture-memory budget exceeded (${(textureBytes / (1024 * 1024)).toFixed(1)} MiB/${textureMemoryBudgetBytes / (1024 * 1024)} MiB).`);
+        overMemoryBudget.current = true;
+      } else if (textureBytes <= textureMemoryBudgetBytes) {
+        overMemoryBudget.current = false;
+      }
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [gl, scene]);
+
+  return (
+    <Html fullscreen zIndexRange={[5, 0]}>
+      <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-2 font-mono text-[9px] leading-relaxed text-slate-300 shadow-lg backdrop-blur">
+        <div>DRAW CALLS&nbsp; {metrics.calls} / {drawCallBudget}</div>
+        <div>TEXTURES&nbsp;&nbsp;&nbsp;&nbsp; {metrics.textures} / {textureCountBudget}</div>
+        <div>TEXTURE MEM&nbsp; {(metrics.textureBytes / (1024 * 1024)).toFixed(1)} / {textureMemoryBudgetBytes / (1024 * 1024)} MiB</div>
+      </div>
+    </Html>
+  );
+}
+
 function SceneLoader() {
   const { progress } = useProgress();
   return (
@@ -137,7 +244,12 @@ function SceneLoader() {
 export default function AvatarScene({ emotion }: { emotion: Emotion }) {
   return (
     <div className="relative h-full w-full">
-      <Canvas camera={{ position: [0, 1.4, 5.4], fov: 35 }} dpr={[1, 1.75]} gl={{ alpha: true, antialias: true }}>
+      <Canvas
+        camera={{ position: [0, 1.4, 5.4], fov: 35 }}
+        dpr={[1, 2]}
+        gl={{ alpha: true, antialias: true }}
+        onCreated={({ gl }) => gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))}
+      >
         <ambientLight intensity={1.8} />
         <directionalLight position={[3, 5, 4]} intensity={3.1} color="#fff2df" />
         <directionalLight position={[-4, 2, -3]} intensity={2.2} color="#a6a5ff" />
@@ -146,6 +258,7 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
           <Avatar emotion={emotion} />
           <Environment preset="studio" />
         </Suspense>
+        {import.meta.env.DEV && <><Stats /> <RendererBudgetMonitor /></>}
         <OrbitControls
           target={[0, 1.58, 0]}
           enablePan={false}
@@ -169,4 +282,4 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
   );
 }
 
-useGLTF.preload("/models/avatar.glb");
+useGLTF.preload(avatarModelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));

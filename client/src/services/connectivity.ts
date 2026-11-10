@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Network } from "@capacitor/network";
+import { addNetworkStatusListener, getNetworkStatus } from "./AIService";
 
 export function useConnectivity() {
   const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
@@ -12,12 +12,12 @@ export function useConnectivity() {
     window.addEventListener("online", setBrowserStatus);
     window.addEventListener("offline", setBrowserStatus);
 
-    void Network.getStatus().then((status) => {
+    void getNetworkStatus().then((status) => {
       if (active) setIsOnline(status.connected && navigator.onLine);
     }).catch(() => setBrowserStatus());
 
-    void Network.addListener("networkStatusChange", (status) => {
-      if (active) setIsOnline(status.connected && navigator.onLine);
+    void addNetworkStatusListener((connected) => {
+      if (active) setIsOnline(connected);
     }).then((listener) => {
       if (active) networkListener = listener;
       else void listener.remove();

@@ -2,7 +2,6 @@ require("dotenv").config();
 
 const cors = require("cors");
 const express = require("express");
-const CloudAIClient = require("groq-sdk");
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
@@ -10,8 +9,8 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capa
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const cloudApiKey = process.env.CLOUD_API_KEY || process.env.GROQ_API_KEY;
-const cloudClient = cloudApiKey ? new CloudAIClient({ apiKey: cloudApiKey }) : null;
+const cloudApiKey = process.env.CLOUD_API_KEY;
+const cloudApiUrl = process.env.CLOUD_API_URL;
 const cloudModels = (
   process.env.CLOUD_MODEL_FALLBACKS ||
   ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b"].join(",")
@@ -71,19 +70,29 @@ function parseAssistantOutput(content) {
 }
 
 async function requestCloud(messages) {
-  if (!cloudClient) throw new Error("Add CLOUD_API_KEY to server/.env to enable Cloud AI.");
+  if (!cloudApiKey || !cloudApiUrl) throw new Error("Add CLOUD_API_URL and CLOUD_API_KEY to server/.env to enable Cloud AI.");
 
   let lastError;
   for (const model of cloudModels) {
     try {
-      const completion = await cloudClient.chat.completions.create({
-        model,
-        messages: [{ role: "system", content: systemPrompt }, ...messages],
-        response_format: { type: "json_object" },
-        temperature: 0.7,
-        max_tokens: 700,
+      const response = await fetch(cloudApiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${cloudApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+          max_tokens: 700,
+        }),
+        signal: AbortSignal.timeout(120_000),
       });
-      const content = completion.choices[0]?.message?.content?.trim();
+      const completion = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+      const content = completion.choices?.[0]?.message?.content?.trim();
       if (content) return parseAssistantOutput(content);
       lastError = new Error(`${model} returned an empty response.`);
     } catch (error) {
