@@ -237,16 +237,17 @@ npm install --prefix server
 cp server/.env.example server/.env
 ```
 
-For hosted inference, set an OpenAI-compatible endpoint and API key in `server/.env`:
+Groq is the default cloud provider. Add your server-side Groq API key to `server/.env`:
 
 ```dotenv
 PORT=3001
 CLIENT_ORIGIN=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost
-CLOUD_API_URL=https://your-provider.example/v1/chat/completions
-CLOUD_API_KEY=your_server_side_api_key
+GROQ_API_KEY=your_server_side_groq_api_key
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
 ```
 
-The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable.
+The server defaults to Groq's OpenAI-compatible endpoint and GPT-OSS 120B, with GPT-OSS 20B as a fallback. You can choose any configured cloud model in the app's inference settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
 
 ### 3. Configure the client
 
@@ -311,9 +312,13 @@ curl http://localhost:3001/api/health
 | --- | --- | --- | --- |
 | `PORT` | No | `3001` | Express API port. |
 | `CLIENT_ORIGIN` | No | Local origins | Comma-separated CORS allowlist. |
-| `CLOUD_API_URL` | For cloud mode | — | OpenAI-compatible `/chat/completions` endpoint. |
-| `CLOUD_API_KEY` | For cloud mode | — | Server-side provider key. |
-| `CLOUD_MODEL_FALLBACKS` | For cloud mode | — | Comma-separated model IDs accepted by the configured endpoint, attempted in order. |
+| `GROQ_API_KEY` | For default cloud mode | — | Server-side Groq key. `CLOUD_API_KEY` remains available for compatible providers. |
+| `GROQ_API_URL` | No | Groq chat completions endpoint | Optional Groq-compatible endpoint override. `CLOUD_API_URL` can select another compatible provider. |
+| `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Primary cloud model. |
+| `GROQ_MODEL_FALLBACKS` | No | `openai/gpt-oss-20b` | Comma-separated fallback models, also shown in the app's model selector. |
+| `CLOUD_API_URL` | No | Groq endpoint | OpenAI-compatible `/chat/completions` endpoint for an alternate provider. |
+| `CLOUD_API_KEY` | No | — | Server-side key for an alternate provider; never expose it in a `VITE_*` variable. |
+| `CLOUD_MODEL_FALLBACKS` | No | — | Legacy-compatible comma-separated model list for an alternate provider. |
 | `OLLAMA_BASE_URL` | For Ollama | `http://localhost:11434` | Ollama server URL. |
 | `OLLAMA_MODEL` | For Ollama | `gurubot/self-after-dark:latest` | Ollama model name. |
 | `PINECALL_TOKEN_URL` | For calls | — | Trusted server endpoint returning short-lived Pinecall credentials. |
@@ -327,7 +332,7 @@ All environment templates are committed as examples. Actual secrets are ignored 
 
 ### Cloud AI
 
-Cloud mode calls the configured OpenAI-compatible provider through the Express API. This keeps the provider key off the client and allows the server to try the configured model fallback chain.
+Cloud mode defaults to Groq GPT-OSS 120B through the Express API, with GPT-OSS 20B as a fallback. The inference settings let users choose among the server's configured cloud models or switch to another runtime. Provider keys stay on the server. A selected cloud model is attempted first, followed by the remaining configured models.
 
 ### WebLLM Local
 
@@ -452,6 +457,8 @@ npm run cap:run:electron --prefix client
 
 The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` while setting up the generated Android project. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves. It only changes generated dependency files under `client/node_modules`.
 
+The iOS workflow runs `npm run cap:patch:ios --prefix client` before generating the native project. This adds the system zlib linker flag required by the prebuilt native-agent FFI library, whose libgit2 symbols depend on `libz`.
+
 For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS API URL or the development computer's LAN IP in `VITE_API_BASE_URL`.
 
 ### Build artifacts and installation
@@ -520,8 +527,9 @@ Node.js service
    NODE_ENV=production
    PORT=3001
    CLIENT_ORIGIN=https://app.example.com
-   CLOUD_API_URL=https://provider.example/v1/chat/completions
-   CLOUD_API_KEY=replace_me
+   GROQ_API_KEY=replace_me
+   GROQ_MODEL=openai/gpt-oss-120b
+   GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
    ```
 
 4. Start the server:

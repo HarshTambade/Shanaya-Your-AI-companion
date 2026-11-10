@@ -79,6 +79,7 @@ function trimConversation(messages: AgentMessage[]) {
 
 export async function runAgentTurn(options: {
   mode: InferenceMode;
+  model?: string;
   messages: ChatMessage[];
   generateLocal: (prompt: string, mode: InferenceMode) => Promise<string>;
   onActivity?: (activity: AgentActivity) => void;
@@ -105,7 +106,7 @@ export async function runAgentTurn(options: {
     let toolCalls: AgentToolCall[] = [];
     if (mode === "cloud" || mode === "ollama") {
       trimConversation(conversation);
-      const step = await LLMRouter.requestStep(mode, conversation, tools);
+      const step = await LLMRouter.requestStep(mode, conversation, tools, options.model);
       content = step.content;
       if (step.toolCalls.length > 8) throw new Error("The model requested too many tools at once.");
       toolCalls = step.toolCalls;

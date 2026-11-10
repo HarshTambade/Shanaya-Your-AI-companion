@@ -9,16 +9,36 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capa
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const cloudApiKey = process.env.CLOUD_API_KEY;
-const cloudApiUrl = process.env.CLOUD_API_URL;
-const cloudModels = (
-  process.env.CLOUD_MODEL_FALLBACKS ||
+const defaultGroqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
+const cloudApiUrl = process.env.GROQ_API_URL || process.env.CLOUD_API_URL || defaultGroqApiUrl;
+const isGroqProvider = cloudApiUrl.startsWith("https://api.groq.com/");
+const cloudApiKey = isGroqProvider
+  ? process.env.GROQ_API_KEY || process.env.CLOUD_API_KEY
+  : process.env.CLOUD_API_KEY || process.env.GROQ_API_KEY;
+const configuredPrimaryModels = (
+  process.env.GROQ_MODEL ||
   process.env.CLOUD_MODEL ||
   ""
 )
   .split(",")
   .map((model) => model.trim())
   .filter(Boolean);
+const configuredFallbacks = (
+  process.env.GROQ_MODEL_FALLBACKS ||
+  process.env.CLOUD_MODEL_FALLBACKS ||
+  ""
+)
+  .split(",")
+  .map((model) => model.trim())
+  .filter(Boolean);
+const primaryCloudModel = configuredPrimaryModels.shift() || configuredFallbacks.shift() || (isGroqProvider ? "openai/gpt-oss-120b" : "");
+const cloudModels = [...new Set([
+  primaryCloudModel,
+  ...configuredPrimaryModels,
+  ...configuredFallbacks,
+  ...(isGroqProvider && !process.env.GROQ_MODEL_FALLBACKS && !process.env.CLOUD_MODEL_FALLBACKS ? ["openai/gpt-oss-20b"] : []),
+].filter(Boolean))];
+const cloudProvider = isGroqProvider ? "Groq" : "Custom";
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "gurubot/self-after-dark:latest";
 const systemPrompt = [
@@ -33,6 +53,10 @@ app.use(express.json({ limit: "12mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/api/models", (_req, res) => {
+  res.json({ provider: cloudProvider, defaultModel: cloudModels[0] || "", models: cloudModels });
 });
 
 app.get("/api/pinecall/token", async (_req, res) => {
@@ -70,11 +94,11 @@ function parseAssistantOutput(content) {
   return { reply: content.trim(), emotion: "neutral" };
 }
 
-async function requestCloud(messages) {
-  if (!cloudApiKey || !cloudApiUrl) throw new Error("Add CLOUD_API_URL and CLOUD_API_KEY to server/.env to enable Cloud AI.");
+async function requestCloud(messages, models = cloudModels) {
+  if (!cloudApiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
 
   let lastError;
-  for (const model of cloudModels) {
+  for (const model of models) {
     try {
       const response = await fetch(cloudApiUrl, {
         method: "POST",
@@ -87,7 +111,7 @@ async function requestCloud(messages) {
           messages: [{ role: "system", content: systemPrompt }, ...messages],
           response_format: { type: "json_object" },
           temperature: 0.7,
-          max_tokens: 700,
+          max_completion_tokens: 700,
         }),
         signal: AbortSignal.timeout(120_000),
       });
@@ -147,10 +171,10 @@ function normalizeTools(tools) {
   return normalized;
 }
 
-async function requestCloudAgent(messages, tools) {
-  if (!cloudApiKey || !cloudApiUrl) throw new Error("Add CLOUD_API_URL and CLOUD_API_KEY to server/.env to enable Cloud AI.");
+async function requestCloudAgent(messages, tools, models = cloudModels) {
+  if (!cloudApiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
   let lastError;
-  for (const model of cloudModels) {
+  for (const model of models) {
     try {
       const response = await fetch(cloudApiUrl, {
         method: "POST",
@@ -164,7 +188,7 @@ async function requestCloudAgent(messages, tools) {
           tools,
           tool_choice: "auto",
           temperature: 0.4,
-          max_tokens: 900,
+          max_completion_tokens: 900,
         }),
         signal: AbortSignal.timeout(120_000),
       });
@@ -201,13 +225,17 @@ async function requestOllamaAgent(messages, tools) {
 }
 
 app.post("/api/agent", async (req, res) => {
-  const { messages, mode = "cloud" } = req.body || {};
+  const { messages, mode = "cloud", model } = req.body || {};
   if (mode !== "cloud" && mode !== "ollama") return res.status(400).json({ error: "Agent mode must be cloud or ollama." });
   if (!Array.isArray(messages) || messages.length < 1 || messages.length > 40 || !messages.every(isValidAgentMessage)) {
     return res.status(400).json({ error: "The agent conversation is invalid or too long." });
   }
   const tools = normalizeTools(req.body?.tools);
   if (!tools) return res.status(400).json({ error: "The agent tool schemas are invalid." });
+  const selectedModels = mode === "cloud" && typeof model === "string"
+    ? (cloudModels.includes(model) ? [model, ...cloudModels.filter((candidate) => candidate !== model)] : null)
+    : cloudModels;
+  if (!selectedModels) return res.status(400).json({ error: "The selected cloud model is not configured on this server." });
 
   try {
     const normalizedMessages = messages.map((message) => ({
@@ -218,11 +246,11 @@ app.post("/api/agent", async (req, res) => {
     }));
     const message = mode === "ollama"
       ? await requestOllamaAgent(normalizedMessages, tools)
-      : await requestCloudAgent(normalizedMessages, tools);
+      : await requestCloudAgent(normalizedMessages, tools, selectedModels);
     return res.json({ message: { content: typeof message.content === "string" ? message.content : "", tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls : [] } });
   } catch (error) {
     console.error(`${mode} agent request failed:`, error.message);
-    const missingCloudSettings = mode === "cloud" && (!cloudApiKey || !cloudApiUrl);
+    const missingCloudSettings = mode === "cloud" && (!cloudApiKey || cloudModels.length === 0);
     return res.status(missingCloudSettings ? 503 : 502).json({
       error: mode === "ollama"
         ? "Could not reach Ollama or its model does not support tool calling."
@@ -286,7 +314,7 @@ app.post("/api/desktop/computer", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { messages, mode = "cloud" } = req.body || {};
+  const { messages, mode = "cloud", model } = req.body || {};
   if (mode !== "cloud" && mode !== "ollama") {
     return res.status(400).json({ error: "mode must be either cloud or ollama; local inference runs directly in the client." });
   }
@@ -307,11 +335,16 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "Each message needs a valid role and non-empty content up to 4,000 characters." });
   }
 
+  const selectedModels = mode === "cloud" && typeof model === "string"
+    ? (cloudModels.includes(model) ? [model, ...cloudModels.filter((candidate) => candidate !== model)] : null)
+    : cloudModels;
+  if (!selectedModels) return res.status(400).json({ error: "The selected cloud model is not configured on this server." });
+
   try {
     const normalizedMessages = messages.map(({ role, content }) => ({ role, content: content.trim() }));
     const result = mode === "ollama"
       ? await requestOllama(normalizedMessages)
-      : await requestCloud(normalizedMessages);
+      : await requestCloud(normalizedMessages, selectedModels);
     if (!result.reply) return res.status(502).json({ error: "The AI returned an empty response. Please try again." });
     return res.json(result);
   } catch (error) {
@@ -319,7 +352,7 @@ app.post("/api/chat", async (req, res) => {
     const message = mode === "ollama"
       ? "Could not reach your Ollama server. Check that it is running and that OLLAMA_BASE_URL is correct."
       : "Cloud AI could not respond using the configured model fallback chain. Check the API key and model access.";
-    return res.status(mode === "cloud" && (!cloudApiKey || !cloudApiUrl) ? 503 : 502).json({ error: message });
+    return res.status(mode === "cloud" && (!cloudApiKey || cloudModels.length === 0) ? 503 : 502).json({ error: message });
   }
 });
 

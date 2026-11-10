@@ -31,12 +31,19 @@ const welcomeMessage: ChatMessage = {
 };
 
 const modeDetails: Record<InferenceMode, { label: string; description: string; icon: typeof Globe2 }> = {
-  cloud: { label: "Agent AI", description: "Cloud model with device tools", icon: Globe2 },
+  cloud: { label: "Groq Cloud", description: "Groq model with device tools", icon: Globe2 },
   webllm: { label: "WebLLM Local", description: "Runs in this browser with WebGPU", icon: Cpu },
   ollama: { label: "Local Ollama", description: "Uses your configured Ollama server", icon: HardDrive },
   native: { label: "On-device AI", description: "Runs a downloaded llama.cpp model", icon: Smartphone },
+  mobileclaw: { label: "MobileClaw · Anthropic", description: "Native agent using your Anthropic key", icon: Smartphone },
   desktop: { label: "Desktop Agent", description: "Uses the desktop with confirmation", icon: Laptop },
 };
+
+function modelLabel(model: string) {
+  if (model === "openai/gpt-oss-120b") return "GPT-OSS 120B · Groq default";
+  if (model === "openai/gpt-oss-20b") return "GPT-OSS 20B · Groq fallback";
+  return model;
+}
 
 function normalizeEmotion(value: unknown): Emotion {
   return value === "happy" || value === "sad" || value === "angry" || value === "neutral" || value === "surprised" || value === "thinking"
@@ -82,6 +89,9 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<InferenceMode>("cloud");
+  const [cloudModels, setCloudModels] = useState<string[]>([]);
+  const [cloudModel, setCloudModel] = useState("");
+  const [cloudProvider, setCloudProvider] = useState("Groq");
   const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>("en-US");
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
@@ -105,11 +115,50 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const desktopAvailable = hasDesktopBridge();
   const effectiveMode = resolveInferenceMode(mode, isOnline);
   const localLLM = useBrowserLLM(effectiveMode === "webllm" ? WEBLLM_MODEL : undefined);
-  const selectedMode = modeDetails[effectiveMode];
+  const selectedMode = effectiveMode === "cloud"
+    ? {
+      ...modeDetails.cloud,
+      label: cloudProvider === "Groq" ? "Groq Cloud" : `${cloudProvider} AI`,
+      description: `${cloudProvider} model with device tools`,
+    }
+    : modeDetails[effectiveMode];
   const call = useCallClient(shanayaCallClient);
   const isCallConnecting = call.status === "connecting";
   const isCallConnected = call.status === "connected";
   const showCallPanel = call.status !== "idle" || call.messages.length > 0;
+
+  useEffect(() => {
+    let active = true;
+    void fetch(apiUrl("/api/models"))
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (!active || !data || !Array.isArray(data.models)) return;
+        const models = data.models.filter((model: unknown): model is string => typeof model === "string" && model.length > 0);
+        setCloudModels(models);
+        if (typeof data.provider === "string" && data.provider) setCloudProvider(data.provider);
+        let storedModel: string | null = null;
+        try {
+          storedModel = window.localStorage.getItem("shanaya.cloudModel");
+        } catch {
+          storedModel = null;
+        }
+        const initialModel = models.includes(storedModel || "")
+          ? storedModel!
+          : models.includes(data.defaultModel) ? data.defaultModel : models[0] || "";
+        setCloudModel(initialModel);
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!cloudModel) return;
+    try {
+      window.localStorage.setItem("shanaya.cloudModel", cloudModel);
+    } catch {
+      // The server still supplies its default if storage is unavailable.
+    }
+  }, [cloudModel]);
 
   const refreshNativeStatus = useCallback(async () => {
     if (!isNative) {
@@ -188,12 +237,13 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       if (effectiveMode === "desktop") {
         const reply = await runDesktopAgentTurn(content, publishActivity);
         result = parseAIResponse(reply);
-      } else if (effectiveMode === "cloud" && isNative && isOnline && nativeAgentStatus.hasApiKey) {
+      } else if (effectiveMode === "mobileclaw" && isNative && isOnline && nativeAgentStatus.hasApiKey) {
         const response = await runMobileAgentTurn(content, publishActivity);
         result = parseAIResponse(response);
       } else {
         result = await runAgentTurn({
           mode: effectiveMode,
+          model: cloudModel || undefined,
           messages: nextMessages,
           generateLocal: async (prompt, routeMode) => {
             if (routeMode === "webllm") {
@@ -232,7 +282,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       await setMobileAgentApiKey(mobileApiKey);
       setMobileApiKey("");
       setNativeAgentStatus({ available: true, initialized: true, hasApiKey: true });
-      setVoiceStatus("Native agent connected. Online conversations use Anthropic and its retention policy.");
+      setVoiceStatus("MobileClaw connected. Select it in inference settings; Groq stays the default.");
     } catch (keyError) {
       setError(keyError instanceof Error ? keyError.message : "Could not save the native agent key.");
     } finally {
@@ -391,15 +441,18 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               <Cpu size={14} className="text-violet-300" /> Inference mode
             </div>
             <div className="space-y-2">
-              {(Object.keys(modeDetails) as InferenceMode[]).filter((option) => option !== "desktop" || desktopAvailable).map((option) => {
-                const detail = modeDetails[option];
+              {(Object.keys(modeDetails) as InferenceMode[]).filter((option) =>
+                (option !== "desktop" || desktopAvailable) && (option !== "mobileclaw" || isNative)
+              ).map((option) => {
+                const detail = option === "cloud" ? selectedMode : modeDetails[option];
                 const Icon = detail.icon;
                 const unavailableNativeOption = option === "native" && !isNative;
+                const unavailableMobileClaw = option === "mobileclaw" && !nativeAgentStatus.hasApiKey;
                 return (
                   <button
                     key={option}
                     type="button"
-                    disabled={isLoading || unavailableNativeOption}
+                    disabled={isLoading || unavailableNativeOption || unavailableMobileClaw}
                     onClick={() => {
                       setMode(option);
                       setError("");
@@ -410,13 +463,37 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
                     <Icon size={16} className={mode === option ? "text-violet-200" : "text-slate-500"} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-slate-200">{detail.label}</span>
-                      <span className="mt-0.5 block text-xs text-slate-500">{unavailableNativeOption ? "Available in the Capacitor app" : detail.description}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">
+                        {unavailableNativeOption
+                          ? "Available in the Capacitor app"
+                          : unavailableMobileClaw
+                            ? "Add an Anthropic key below to enable"
+                            : detail.description}
+                      </span>
                     </span>
                     {mode === option && <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />}
                   </button>
                 );
               })}
             </div>
+
+            {effectiveMode === "cloud" && (
+              <div className="mt-3 rounded-xl border border-violet-300/10 bg-violet-300/[0.035] p-3">
+                <label htmlFor="cloud-model" className="mb-1.5 block text-xs font-semibold text-slate-300">{cloudProvider} model</label>
+                <select
+                  id="cloud-model"
+                  value={cloudModel}
+                  onChange={(event) => setCloudModel(event.target.value)}
+                  disabled={isLoading || cloudModels.length === 0}
+                  className="w-full rounded-lg border border-white/[0.08] bg-[#111521] px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-violet-300/30 disabled:opacity-50"
+                >
+                  {cloudModels.length === 0
+                    ? <option value="">Waiting for server model settings…</option>
+                    : cloudModels.map((model) => <option key={model} value={model}>{modelLabel(model)}</option>)}
+                </select>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">{cloudProvider === "Groq" ? "Groq is the default." : `${cloudProvider} is configured on the server.`} If a selected model is unavailable, the server tries the remaining configured models.</p>
+              </div>
+            )}
 
             {effectiveMode === "native" && (
               <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2 text-xs text-slate-400">
@@ -451,7 +528,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
                   <span className={`ml-auto h-1.5 w-1.5 rounded-full ${nativeAgentStatus.hasApiKey ? "bg-emerald-400" : "bg-slate-600"}`} />
                 </div>
                 {nativeAgentStatus.hasApiKey ? (
-                  <p className="text-[11px] leading-relaxed text-slate-400">MobileClaw is ready with private on-device vector memory. Online agent requests go directly to Anthropic using its retention policy.</p>
+                  <p className="text-[11px] leading-relaxed text-slate-400">MobileClaw is ready with on-device vector memory. Select MobileClaw · Anthropic above to use it; Groq remains the default cloud model.</p>
                 ) : (
                   <>
                     <p className="mb-2 text-[11px] leading-relaxed text-slate-500">Add an Anthropic API key to use the native Rust agent and its on-device LanceDB memory. The key is stored by the native agent plugin.</p>
@@ -477,7 +554,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               <p className="text-[11px] leading-relaxed text-slate-500">
                 {!isOnline
                   ? "Offline messages use WebLLM in browsers and a downloaded llama.cpp model in the iOS or Android app. Those prompts stay on this device. Speech input uses the platform recognizer, whose offline support varies."
-                  : "WebLLM and llama.cpp process prompts locally. Ollama sends prompts to its configured endpoint. Agent AI sends prompts and tool requests to the configured provider. The native MobileClaw option sends prompts directly to Anthropic. If Mithi TTS is configured, reply text is sent to that service; otherwise installed system voices are used. Voice calls use Pinecall over the internet."}
+                  : `WebLLM and llama.cpp process prompts locally. Ollama sends prompts to its configured endpoint. ${cloudProvider} Cloud sends prompts and tool requests to its configured provider. MobileClaw sends prompts directly to Anthropic only when selected. If Mithi TTS is configured, reply text is sent to that service; otherwise installed system voices are used. Voice calls use Pinecall over the internet.`}
               </p>
             </div>
           </div>
@@ -618,9 +695,11 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         </form>
         <p className="mt-1.5 text-center text-[9px] text-slate-500">
           {effectiveMode === "cloud"
-            ? isNative && nativeAgentStatus.hasApiKey ? "MobileClaw agent · Anthropic retention policy applies" : "Agent AI · configured provider retention policy applies"
+            ? `${cloudProvider} · ${modelLabel(cloudModel || cloudModels[0] || "")}`
             : effectiveMode === "ollama"
               ? "Ollama · prompts go to your configured endpoint"
+              : effectiveMode === "mobileclaw"
+                ? "MobileClaw · Anthropic retention policy applies"
               : effectiveMode === "desktop"
                 ? "Desktop agent · screenshots go to Anthropic; actions need confirmation"
               : "On-device inference · messages stay on this device"}

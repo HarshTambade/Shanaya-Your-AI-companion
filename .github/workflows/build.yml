@@ -159,6 +159,8 @@ jobs:
           cache-dependency-path: client/package-lock.json
       - run: npm ci --ignore-scripts
         working-directory: client
+      - run: npm run cap:patch:ios
+        working-directory: client
       - run: npm run models:draco
         working-directory: client
       - run: npm run build
