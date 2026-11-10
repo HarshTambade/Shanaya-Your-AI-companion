@@ -67,14 +67,26 @@ jobs:
         working-directory: client/electron
       - run: npx cap sync @capawesome/capacitor-electron
         working-directory: client
-      - run: npm run pack
+      - name: Package Electron app
         working-directory: client/electron
+        shell: bash
         env:
-          CSC_LINK: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || runner.os == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
+          CSC_LINK_VALUE: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || runner.os == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD_VALUE: ${{ runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK_VALUE" ] && [ ! -d "$CSC_LINK_VALUE" ]; then
+            export CSC_LINK="$CSC_LINK_VALUE"
+            export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_VALUE"
+          else
+            if [ -n "$CSC_LINK_VALUE" ]; then
+              echo "Ignoring CSC_LINK because it points to a directory, not a certificate file or encoded certificate."
+            fi
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npm run pack
       - uses: actions/upload-artifact@v4
         with:
           name: shanaya-electron-${{ matrix.os }}
@@ -97,7 +109,7 @@ jobs:
           java-version: "21"
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;29.0.13113456 cmake;3.22.1"
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;29.0.13113456 cmake;3.22.1"
       - run: npm ci --ignore-scripts
         working-directory: client
       - run: npm run models:draco
@@ -107,6 +119,8 @@ jobs:
         env:
           VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
       - run: npx cap add android
+        working-directory: client
+      - run: npm run cap:patch:android
         working-directory: client
       - run: npx cap sync android
         working-directory: client
@@ -179,6 +193,9 @@ jobs:
             || /usr/libexec/PlistBuddy -c 'Add :NSSpeechRecognitionUsageDescription string Shanaya uses speech recognition to transcribe voice messages.' "$INFO"
       - run: npx cap sync ios
         working-directory: client
+      - name: Install iOS pods
+        working-directory: client/ios/App
+        run: pod install --repo-update
       - name: Import Apple signing certificate
         if: vars.IOS_SIGNING_ENABLED == 'true'
         uses: apple-actions/import-codesign-certs@v7
@@ -201,8 +218,17 @@ jobs:
           else
             SIGNING_ALLOWED=NO
           fi
+          if [ -d client/ios/App/App.xcworkspace ]; then
+            XCODE_CONTAINER=(-workspace client/ios/App/App.xcworkspace)
+          elif [ -d client/ios/App/App.xcodeproj ]; then
+            XCODE_CONTAINER=(-project client/ios/App/App.xcodeproj)
+          else
+            echo "No generated iOS workspace or project found under client/ios/App" >&2
+            find client/ios -maxdepth 3 \( -name '*.xcworkspace' -o -name '*.xcodeproj' \) -print >&2 || true
+            exit 1
+          fi
           xcodebuild \
-            -workspace client/ios/App/App.xcworkspace \
+            "${XCODE_CONTAINER[@]}" \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \

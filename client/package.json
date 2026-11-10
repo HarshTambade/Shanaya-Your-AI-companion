@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "cap:sync": "npm run build && cap sync",
+    "cap:sync": "npm run build && cap sync && npm run cap:patch:android",
+    "cap:patch:android": "node scripts/patch-capacitor-gradle.mjs",
     "cap:add:ios": "cap add ios",
     "cap:add:android": "cap add android",
     "cap:add:electron": "cap add @capawesome/capacitor-electron",
@@ -15,7 +16,7 @@
     "cap:run:electron": "npm run build && cap sync @capawesome/capacitor-electron && cap run @capawesome/capacitor-electron",
     "models:draco": "node scripts/compress-avatar.mjs",
     "cap:run:ios": "npm run build && cap sync ios && cap run ios",
-    "cap:run:android": "npm run build && cap sync android && cap run android"
+    "cap:run:android": "npm run build && cap sync android && npm run cap:patch:android && cap run android"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",

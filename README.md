@@ -14,9 +14,26 @@ Shanaya is a source-available AI companion built for natural conversation across
 
 > **Project status:** Active development. APIs, native integrations, model formats, and build workflows may change while the project matures.
 
+## Downloads
+
+<p>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Android APK build" src="https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="iOS build information" src="https://img.shields.io/badge/iOS-TestFlight%20%2F%20App%20Store-111111?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="macOS DMG build" src="https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Windows installer build" src="https://img.shields.io/badge/Windows-EXE-0078D4?logo=windows&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Linux package build" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
+</p>
+
+These links open the [GitHub Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml). Open a successful run and download its platform artifact. The in-app **Downloads** menu supports direct installer URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`.
+
+**iOS note:** CI produces an Xcode archive, not a directly installable IPA. iPhone and iPad installation requires a signed App Store or TestFlight build. The iOS button links to build information and does not bypass Apple signing or distribution.
+
+> Builds are currently available as workflow artifacts. A tagged GitHub Release is not created automatically.
+
 ## Contents
 
 - [Highlights](#highlights)
+- [Downloads](#downloads)
 - [Architecture](#architecture)
 - [How a message works](#how-a-message-works)
 - [Runtime capability matrix](#runtime-capability-matrix)
@@ -282,6 +299,11 @@ curl http://localhost:3001/api/health
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
 | `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default avatar is `/models/avatar.glb`. |
 | `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
+| `VITE_ANDROID_DOWNLOAD_URL` | No | Direct Android installer URL in the Downloads menu; defaults to the Actions build page. |
+| `VITE_IOS_DOWNLOAD_URL` | No | App Store/TestFlight or signed iOS distribution page; defaults to the Actions build page. |
+| `VITE_MACOS_DOWNLOAD_URL` | No | Direct macOS installer URL; defaults to the Actions build page. |
+| `VITE_WINDOWS_DOWNLOAD_URL` | No | Direct Windows installer URL; defaults to the Actions build page. |
+| `VITE_LINUX_DOWNLOAD_URL` | No | Direct Linux package URL; defaults to the Actions build page. |
 
 ### Server environment: `server/.env`
 
@@ -428,7 +450,24 @@ npm run cap:run:android --prefix client
 npm run cap:run:electron --prefix client
 ```
 
+The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` while setting up the generated Android project. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves. It only changes generated dependency files under `client/node_modules`.
+
 For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS API URL or the development computer's LAN IP in `VITE_API_BASE_URL`.
+
+### Build artifacts and installation
+
+The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Open a successful workflow run and download the matching artifact:
+
+| Platform | Artifact name | Format and installation notes |
+| --- | --- | --- |
+| Android | `shanaya-android` | APK. The workflow uses release signing only when Android signing secrets are configured; otherwise it creates a debug APK. |
+| iOS | `shanaya-ios-archive` | Xcode archive for signing/export. It is not a ready-to-install IPA; distribute through TestFlight or the App Store. |
+| macOS | `shanaya-electron-macos-15` | Electron installer output. Code signing and notarization depend on Apple credentials. |
+| Windows | `shanaya-electron-windows-2022` | Electron installer output. Authenticode signing depends on configured credentials. |
+| Linux | `shanaya-electron-ubuntu-24.04` | Electron installer output from the Linux runner. |
+| Web/PWA | `shanaya-web-pwa` | Static `dist` bundle. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
+
+The in-app Downloads menu opens the Actions workflow by default. Set the platform URL variables in `client/.env` to point to stable release pages, store listings, or direct installers. Vite embeds these links at build time, so rebuild the client after changing them.
 
 ### PWA
 
@@ -743,7 +782,7 @@ No. Shanaya is a software project and is not a substitute for emergency services
 
 ### Can I monetize a fork?
 
-Not under the default project license. Read [`LICENSE`](./LICENSE) before distributing or operating a monetized fork. Commercial use requires a separate written license and, unless otherwise agreed, a 25% share of Gross Revenue plus attribution and reporting obligations.
+Not under the default project license. Read [`LICENSE`](./LICENSE) before distributing or operating a monetized fork. The current license requires a separate written commercial license before monetization; unless that agreement says otherwise, it specifies a 25% share of Gross Revenue plus attribution and reporting obligations.
 
 ## Contributing
 
@@ -795,7 +834,7 @@ Have an idea? Open a feature request with the use case, proposed behavior, and a
 
 ## License
 
-Shanaya is licensed under the [Shanaya Source-Available Non-Commercial License 1.0](./LICENSE).
+Shanaya is licensed under the [Shanaya Source-Available Non-Commercial License 1.0](./LICENSE). Copyright is attributed to Harsh Tambade and Shanaya contributors.
 
 ### Commercial use and monetized forks
 
@@ -803,7 +842,7 @@ This license permits non-commercial use, modification, and redistribution with a
 
 Anyone who forks, modifies, hosts, distributes, sells, advertises, or otherwise monetizes the project must obtain a separate written commercial license before monetization. Unless that agreement states otherwise, the commercial license requires **25% of Gross Revenue** attributable to the monetized fork or derivative work.
 
-Commercial users must also preserve attribution to **Shanaya contributors / original copyright holder**, provide revenue reports, and comply with the payment and audit provisions in [`LICENSE`](./LICENSE). Unauthorized monetization, non-payment, or attribution removal may result in termination of the license and legal enforcement, subject to applicable law.
+Commercial users must also preserve attribution to **Harsh Tambade and Shanaya contributors**, provide revenue reports, and comply with the payment and audit provisions in [`LICENSE`](./LICENSE). Unauthorized monetization, non-payment, or attribution removal may result in termination of the license and legal enforcement, subject to applicable law.
 
 This is a **source-available license, not an OSI-approved open-source license**. The governing jurisdiction is currently reserved for a separate written commercial agreement. Obtain legal advice before relying on this license for commercial distribution.
 

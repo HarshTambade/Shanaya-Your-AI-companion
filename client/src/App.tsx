@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Aperture, Sparkles } from "lucide-react";
 import AvatarScene from "./components/AvatarScene";
 import ChatUI from "./components/ChatUI";
+import PlatformDownloads from "./components/PlatformDownloads";
 import type { Emotion } from "./types";
 
 export default function App() {
@@ -16,7 +17,7 @@ export default function App() {
       </section>
 
       <header
-        className="pointer-events-none absolute left-4 right-4 top-0 z-10 flex items-center justify-between md:left-8 md:right-8"
+        className="pointer-events-none absolute left-4 right-4 top-0 z-30 flex items-center justify-between md:left-8 md:right-8"
         style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
       >
         <div className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-[#101522]/70 px-3 py-2 backdrop-blur-xl">
@@ -28,8 +29,11 @@ export default function App() {
             <p className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-slate-400">Your AI companion</p>
           </div>
         </div>
-        <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-[#101522]/70 px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-slate-300 backdrop-blur-xl sm:flex">
-          <Sparkles size={12} className="text-violet-300" /> Interactive avatar
+        <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 rounded-full border border-white/[0.08] bg-[#101522]/70 px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-slate-300 backdrop-blur-xl sm:flex">
+            <Sparkles size={12} className="text-violet-300" /> Interactive avatar
+          </div>
+          <PlatformDownloads />
         </div>
       </header>
 
