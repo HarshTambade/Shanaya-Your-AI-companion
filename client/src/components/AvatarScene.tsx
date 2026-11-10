@@ -129,7 +129,7 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
       <div
         aria-label={`Avatar emotion: ${emotion}`}
         title={`Shanaya is feeling ${emotion}`}
-        className="pointer-events-none absolute bottom-5 right-5 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-[#101522]/80 px-3 py-2 text-xs capitalize text-slate-200 shadow-lg backdrop-blur-md md:bottom-7 md:right-7"
+        className="pointer-events-none absolute right-4 top-20 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-[#101522]/80 px-3 py-2 text-xs capitalize text-slate-200 shadow-lg backdrop-blur-md md:right-7 md:top-24"
       >
         <span className="text-sm" aria-hidden="true">{emotionIcon[emotion]}</span>
         <span>{emotion}</span>

@@ -6,7 +6,7 @@ const Groq = require("groq-sdk");
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
-const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
+const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capacitor://localhost,http://localhost,https://localhost")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -32,6 +32,28 @@ app.use(express.json({ limit: "256kb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/api/pinecall/token", async (_req, res) => {
+  const tokenIssuerUrl = process.env.PINECALL_TOKEN_URL;
+  if (!tokenIssuerUrl) {
+    return res.status(503).json({ error: "Configure PINECALL_TOKEN_URL with your server-side Pinecall token issuer to enable voice calls." });
+  }
+
+  try {
+    const response = await fetch(tokenIssuerUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const token = await response.json().catch(() => ({}));
+    if (!response.ok || typeof token.token !== "string" || typeof token.server !== "string") {
+      return res.status(502).json({ error: "The Pinecall token issuer returned an invalid response." });
+    }
+    return res.json({ token: token.token, server: token.server, expires_in: token.expires_in ?? token.expiresIn });
+  } catch (error) {
+    console.error("Pinecall token issuer request failed:", error.message);
+    return res.status(502).json({ error: "Could not get a call token. Check the Pinecall token issuer configuration." });
+  }
 });
 
 function parseAssistantOutput(content) {

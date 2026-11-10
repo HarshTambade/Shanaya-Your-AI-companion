@@ -3,4 +3,8 @@ client/node_modules/
 server/node_modules/
 client/dist/
 server/.env
+client/.env
+client/.env.local
+client/.env.*.local
+!client/.env.example
 .DS_Store
