@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { mobileClawVitePlugin } from "capacitor-mobile-claw/vite-plugin";
 
 export default defineConfig({
   plugins: [
     react(),
+    mobileClawVitePlugin(),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["icon.svg"],

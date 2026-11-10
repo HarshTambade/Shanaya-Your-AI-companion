@@ -13,7 +13,8 @@ const cloudApiKey = process.env.CLOUD_API_KEY;
 const cloudApiUrl = process.env.CLOUD_API_URL;
 const cloudModels = (
   process.env.CLOUD_MODEL_FALLBACKS ||
-  ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b"].join(",")
+  process.env.CLOUD_MODEL ||
+  ""
 )
   .split(",")
   .map((model) => model.trim())
@@ -28,7 +29,7 @@ const systemPrompt = [
 const allowedEmotions = new Set(["happy", "sad", "angry", "neutral", "surprised", "thinking"]);
 
 app.use(cors({ origin: allowedOrigins }));
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "12mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -123,6 +124,167 @@ async function requestOllama(messages) {
   return parseAssistantOutput(content);
 }
 
+function isValidAgentMessage(message) {
+  if (!message || !["user", "assistant", "tool"].includes(message.role)) return false;
+  if (typeof message.content !== "string" || message.content.length > 8000) return false;
+  if (message.role === "tool" && (typeof message.tool_call_id !== "string" || message.tool_call_id.length > 160)) return false;
+  if (message.tool_calls !== undefined) {
+    if (!Array.isArray(message.tool_calls) || message.tool_calls.length > 8) return false;
+    if (!message.tool_calls.every((call) => call && typeof call.id === "string" && call.function && typeof call.function.name === "string" && typeof call.function.arguments === "string")) return false;
+  }
+  return true;
+}
+
+function normalizeTools(tools) {
+  if (!Array.isArray(tools) || tools.length < 1 || tools.length > 20) return null;
+  const normalized = [];
+  for (const tool of tools) {
+    const fn = tool?.function;
+    if (tool?.type !== "function" || !fn || typeof fn.name !== "string" || !/^[a-z][a-z0-9_]{1,63}$/.test(fn.name)) return null;
+    if (!fn.parameters || typeof fn.parameters !== "object" || fn.parameters.type !== "object") return null;
+    normalized.push({ type: "function", function: { name: fn.name, description: String(fn.description || "").slice(0, 1000), parameters: fn.parameters } });
+  }
+  return normalized;
+}
+
+async function requestCloudAgent(messages, tools) {
+  if (!cloudApiKey || !cloudApiUrl) throw new Error("Add CLOUD_API_URL and CLOUD_API_KEY to server/.env to enable Cloud AI.");
+  let lastError;
+  for (const model of cloudModels) {
+    try {
+      const response = await fetch(cloudApiUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cloudApiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: `${systemPrompt} When useful, call the provided tools. Never say an action succeeded before the tool result confirms it.` },
+            ...messages,
+          ],
+          tools,
+          tool_choice: "auto",
+          temperature: 0.4,
+          max_tokens: 900,
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+      const message = data.choices?.[0]?.message;
+      if (message && (typeof message.content === "string" || Array.isArray(message.tool_calls))) return message;
+      lastError = new Error(`${model} returned neither a reply nor a tool request.`);
+    } catch (error) {
+      lastError = error;
+      console.warn(`Cloud agent model ${model} failed; trying the next configured model.`);
+    }
+  }
+  throw lastError || new Error("No cloud agent models are configured.");
+}
+
+async function requestOllamaAgent(messages, tools) {
+  const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: ollamaModel,
+      messages: [{ role: "system", content: `${systemPrompt} Use the provided tools when they help. Never claim an action succeeded before a tool result confirms it.` }, ...messages],
+      tools,
+      stream: false,
+      options: { temperature: 0.4 },
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Ollama returned HTTP ${response.status}.`);
+  if (!data.message || (typeof data.message.content !== "string" && !Array.isArray(data.message.tool_calls))) throw new Error("Ollama returned neither a reply nor a tool request.");
+  return data.message;
+}
+
+app.post("/api/agent", async (req, res) => {
+  const { messages, mode = "cloud" } = req.body || {};
+  if (mode !== "cloud" && mode !== "ollama") return res.status(400).json({ error: "Agent mode must be cloud or ollama." });
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 40 || !messages.every(isValidAgentMessage)) {
+    return res.status(400).json({ error: "The agent conversation is invalid or too long." });
+  }
+  const tools = normalizeTools(req.body?.tools);
+  if (!tools) return res.status(400).json({ error: "The agent tool schemas are invalid." });
+
+  try {
+    const normalizedMessages = messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+      ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+    }));
+    const message = mode === "ollama"
+      ? await requestOllamaAgent(normalizedMessages, tools)
+      : await requestCloudAgent(normalizedMessages, tools);
+    return res.json({ message: { content: typeof message.content === "string" ? message.content : "", tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls : [] } });
+  } catch (error) {
+    console.error(`${mode} agent request failed:`, error.message);
+    const missingCloudSettings = mode === "cloud" && (!cloudApiKey || !cloudApiUrl);
+    return res.status(missingCloudSettings ? 503 : 502).json({
+      error: mode === "ollama"
+        ? "Could not reach Ollama or its model does not support tool calling."
+        : "Cloud AI could not complete an agent step with the configured models.",
+    });
+  }
+});
+
+app.post("/api/tts", async (req, res) => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  const language = req.body?.language;
+  const languageMap = { "en-US": "en", "hi-IN": "hi", "mr-IN": "mr" };
+  const ttsUrl = (process.env.MITHI_TTS_URL || "").replace(/\/+$/, "");
+  if (!text || text.length > 5000 || !languageMap[language]) {
+    return res.status(400).json({ error: "Provide text up to 5,000 characters and a supported voice language." });
+  }
+  if (!ttsUrl) return res.status(503).json({ error: "Mithi voice is not configured. The app can use an installed system voice instead." });
+  try {
+    const response = await fetch(`${ttsUrl}/synthesize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "audio/wav" },
+      body: JSON.stringify({ text, language: languageMap[language], voice: "charvi" }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!response.ok) return res.status(502).json({ error: "Mithi voice synthesis failed." });
+    const audio = Buffer.from(await response.arrayBuffer());
+    if (!audio.length || audio.length > 20 * 1024 * 1024) return res.status(502).json({ error: "Mithi returned an invalid audio response." });
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Cache-Control", "no-store");
+    return res.send(audio);
+  } catch (error) {
+    console.error("Mithi TTS request failed:", error.message);
+    return res.status(502).json({ error: "Could not reach the configured Mithi TTS service." });
+  }
+});
+
+app.post("/api/desktop/computer", async (req, res) => {
+  const messages = req.body?.messages;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: "Configure ANTHROPIC_API_KEY on the server to enable desktop computer use." });
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > 30 || messages.some((message) => !message || !["user", "assistant"].includes(message.role) || !(typeof message.content === "string" || Array.isArray(message.content)) || JSON.stringify(message.content).length > 8 * 1024 * 1024)) {
+    return res.status(400).json({ error: "Desktop agent messages are invalid or too large." });
+  }
+  try {
+    const anthropic = new (require("@anthropic-ai/sdk"))({ apiKey });
+    const result = await anthropic.messages.create({
+      model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
+      max_tokens: 1400,
+      system: "You are a careful desktop assistant. Do exactly what the user requested. Never make payments, send messages, submit forms, delete files, or change critical settings without an explicit confirmation from the user. Ask first when a screen action could have those effects.",
+      tools: [{
+        type: "computer_toolset_20260801",
+        configs: Object.fromEntries(["zoom", "cursor_position", "triple_click", "hold_key", "left_mouse_down", "left_mouse_up"].map((name) => [name, { enabled: false }])),
+      }],
+      messages,
+    });
+    return res.json({ content: result.content, stop_reason: result.stop_reason });
+  } catch (error) {
+    console.error("Desktop computer agent request failed:", error.message);
+    return res.status(502).json({ error: "The desktop agent could not complete the Anthropic request." });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   const { messages, mode = "cloud" } = req.body || {};
   if (mode !== "cloud" && mode !== "ollama") {
@@ -157,7 +319,7 @@ app.post("/api/chat", async (req, res) => {
     const message = mode === "ollama"
       ? "Could not reach your Ollama server. Check that it is running and that OLLAMA_BASE_URL is correct."
       : "Cloud AI could not respond using the configured model fallback chain. Check the API key and model access.";
-    return res.status(mode === "cloud" && !cloudClient ? 503 : 502).json({ error: message });
+    return res.status(mode === "cloud" && (!cloudApiKey || !cloudApiUrl) ? 503 : 502).json({ error: message });
   }
 });
 

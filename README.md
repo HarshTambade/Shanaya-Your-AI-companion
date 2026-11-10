@@ -1,67 +1,212 @@
 # Shanaya — Your AI Companion
 
-Shanaya is an interactive AI companion with a conversational chat interface, a 3D avatar, emotion-aware responses, speech input and output, and multiple inference options. The React/Vite client runs as a web app and PWA, in Capacitor on iOS and Android, and in Electron on macOS, Windows, and Linux.
+<p align="center">
+  <strong>A private, multilingual, emotion-aware AI companion with a living 3D avatar.</strong>
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img src="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/issues"><img src="https://img.shields.io/github/issues/HarshTambade/Shanaya---Your-AI-companion-" alt="Issues"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-source--available-orange" alt="Source-available license"></a>
+</p>
 
-- Interactive 3D avatar rendered with React Three Fiber and Three.js
-- Emotion-aware responses and avatar reactions:
-  `happy`, `sad`, `angry`, `neutral`, `surprised`, and `thinking`
-- Four inference modes:
-  - **Cloud AI** for fast hosted responses
-  - **WebLLM Local** for browser-based inference using WebGPU
-  - **Local Ollama** for inference through a locally hosted Ollama server
-  - **On-device AI** through llama.cpp on iOS and Android
-- Automatic offline fallback:
-  - Web browsers use WebLLM when disconnected
-  - iOS and Android use the downloaded llama.cpp model when disconnected
-  - Web and Electron use WebLLM when disconnected
-- Voice input through TalkMode on iOS/Android and browser speech recognition where available
-- Optional speech replies in English, Hindi, and Marathi
-- Optional Pinecall voice calls through browser or native call integrations
-- Responsive layout with mobile safe-area support
-- TypeScript, Tailwind CSS, Vite PWA, Capacitor mobile builds, and Electron desktop builds
+Shanaya is a source-available AI companion built for natural conversation across web, mobile, and desktop environments. It combines a responsive React interface, a real-time 3D avatar, emotion-aware responses, multilingual voice interaction, cloud and local inference, and offline-capable native AI.
+
+> **Project status:** Active development. APIs, native integrations, model formats, and build workflows may change while the project matures.
+
+## Contents
+
+- [Highlights](#highlights)
+- [Architecture](#architecture)
+- [How a message works](#how-a-message-works)
+- [Runtime capability matrix](#runtime-capability-matrix)
+- [Data lifecycle](#data-lifecycle)
+- [Technology](#technology)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Inference modes](#inference-modes)
+- [Agent runtime and device tools](#agent-runtime-and-device-tools)
+- [Desktop computer use](#desktop-computer-use)
+- [Voice and calls](#voice-and-calls)
+- [Mobile and PWA builds](#mobile-and-pwa-builds)
+- [API reference](#api-reference)
+- [Project structure](#project-structure)
+- [Development](#development)
+- [Testing and quality](#testing-and-quality)
+- [Deployment](#deployment)
+- [Security and privacy](#security-and-privacy)
+- [Troubleshooting and FAQ](#troubleshooting-and-faq)
+- [Contributing](#contributing)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## Highlights
+
+- **A living interface:** a Three.js avatar reacts to the emotion returned by the selected model.
+- **Bring your own inference:** use a hosted OpenAI-compatible provider, Ollama, WebLLM, or a downloaded GGUF model on iOS and Android.
+- **Offline-first behavior:** disconnected web and desktop sessions use WebLLM; native mobile sessions use the downloaded llama.cpp model.
+- **Multilingual voice:** speech recognition and speech playback support English (`en-US`), Hindi (`hi-IN`), and Marathi (`mr-IN`), subject to platform availability.
+- **One codebase, multiple surfaces:** run as a Vite web app/PWA, a Capacitor iOS or Android app, or a Capacitor Electron desktop app.
+- **Secret-safe server boundary:** provider credentials stay in the Express server and are never exposed as `VITE_*` variables.
+- **Accessible responsive UI:** mobile safe areas, keyboard-friendly controls, status messages, and responsive layouts are built into the client.
+
+## Product principles
+
+Shanaya is designed around a few principles that should guide new features:
+
+1. **User choice:** users should be able to choose hosted, local, browser, or native inference where their platform supports it.
+2. **Graceful degradation:** unavailable providers, missing hardware, denied permissions, and offline sessions should produce a useful explanation rather than a silent failure.
+3. **Secret separation:** public client configuration belongs in `VITE_*`; provider keys and token-issuer credentials belong only on the server.
+4. **Small, inspectable boundaries:** provider adapters, speech integrations, and native services should remain isolated from the presentation layer.
+5. **Explicit limitations:** model quality, speech availability, data handling, and third-party terms should be documented instead of implied.
+6. **Respectful companion behavior:** Shanaya is software, not a medical, legal, financial, or emergency service. Product copy and integrations should not encourage unsafe reliance.
 
 ## Architecture
 
-```text
-Browser / iOS / Android / Electron
-          |
-          v
-   React + Vite client
-          |
-          +--> Cloud AI service
-          +--> Ollama server
-          +--> WebLLM in the browser
-          +--> llama.cpp GGUF model on iOS / Android
-          |
-          v
-   Express API server
-          |
-          +--> Cloud model fallback chain
-          +--> Ollama API
-          +--> Pinecall token issuer
+```mermaid
+flowchart TD
+    User["User"] --> Surface{"Web / PWA / iOS / Android / Electron"}
+    Surface --> Client["React + Vite client"]
+    Client --> UI["ChatUI"]
+    Client --> Avatar["Three.js avatar"]
+    Client --> Local{"Offline or local mode"}
+    Client --> API["Express API"]
+    Local --> WebLLM["WebLLM + WebGPU"]
+    Local --> Llama["llama.cpp + GGUF on iOS/Android"]
+    API --> Cloud["OpenAI-compatible cloud API"]
+    API --> Ollama["Ollama"]
+    API --> Pinecall["Pinecall token issuer"]
+    Cloud --> Result["reply + emotion"]
+    Ollama --> Result
+    WebLLM --> Result
+    Llama --> Result
+    Result --> Client
+    Client --> Avatar
 ```
 
-The client is in [`client/`](./client), and the API server is in [`server/`](./server). The API keeps provider secrets on the server; the browser only receives the public client configuration from `client/.env`.
+### Responsibilities by layer
+
+| Layer | Location | Responsibility |
+| --- | --- | --- |
+| Presentation | [`client/src/App.tsx`](./client/src/App.tsx) | Composes the avatar surface, branding, and chat experience. |
+| Chat orchestration | [`client/src/components/ChatUI.tsx`](./client/src/components/ChatUI.tsx) | Selects inference mode, shows tool activity/results, manages voice controls, errors, and model readiness. |
+| Agent runtime | [`client/src/services/AgentRuntime.ts`](./client/src/services/AgentRuntime.ts) and [`client/src/services/LLMRouter.ts`](./client/src/services/LLMRouter.ts) | Routes cloud/Ollama tool calls and runs a bounded agent loop for local inference. |
+| Safety and device tools | [`client/src/services/DeviceTools.ts`](./client/src/services/DeviceTools.ts) and [`client/src/services/SafetyGuard.ts`](./client/src/services/SafetyGuard.ts) | Provides confirmed device actions and the user approval boundary. |
+| Native agent | [`client/src/services/MobileAgent.ts`](./client/src/services/MobileAgent.ts) | Initializes MobileClaw, local LanceDB memory, and MobileCron on iOS/Android. |
+| Avatar rendering | [`client/src/components/AvatarScene.tsx`](./client/src/components/AvatarScene.tsx) | Loads the GLB model, applies emotion morphs/poses, and renders the Three.js scene. |
+| AI services | [`client/src/services/AIService.ts`](./client/src/services/AIService.ts) | Handles native GGUF download, llama.cpp initialization, offline generation, and network-aware routing. |
+| Speech services | [`client/src/services/SpeechService.ts`](./client/src/services/SpeechService.ts) and [`client/src/services/VoiceService.ts`](./client/src/services/VoiceService.ts) | Provides speech synthesis and speech recognition integrations. |
+| API boundary | [`server/index.js`](./server/index.js) | Validates chat requests, calls cloud/Ollama providers, normalizes model output, and issues Pinecall token requests. |
+| Packaging | [`client/capacitor.config.ts`](./client/capacitor.config.ts) and [`client/vite.config.ts`](./client/vite.config.ts) | Defines native app identity, PWA behavior, caching, and development proxying. |
+
+## How a message works
+
+1. The user submits a message from the chat surface.
+2. The client checks connectivity and resolves the effective inference mode.
+3. Local modes generate in the browser or on the device.
+4. Cloud and Ollama modes send a validated request to `POST /api/chat`.
+5. The selected model is instructed to return:
+
+   ```json
+   {
+     "reply": "A concise companion response.",
+     "emotion": "happy"
+   }
+   ```
+
+6. The client normalizes the response, appends the reply, speaks it when enabled, and sends the emotion to the avatar.
+7. The avatar updates its lighting, pose, and emotion indicator.
+
+`POST /api/chat` accepts only `user` and `assistant` messages. `POST /api/agent` also accepts assistant tool calls and tool results; both endpoints bound conversation size.
+
+## Runtime capability matrix
+
+Capabilities vary by runtime and by the device/browser configuration:
+
+| Capability | Web/PWA | iOS | Android | Electron |
+| --- | :---: | :---: | :---: | :---: |
+| React UI and 3D avatar | Yes | Yes | Yes | Yes |
+| Cloud inference | Yes | Yes | Yes | Yes |
+| Ollama through API server | Yes | Yes | Yes | Yes |
+| WebLLM/WebGPU | Browser-dependent | Browser/WebView-dependent | Browser/WebView-dependent | Hardware-dependent |
+| Native llama.cpp GGUF | No | Yes | Yes | No |
+| MobileClaw native agent and LanceDB memory | No | Yes | Yes | No |
+| Confirmed device tools | Limited | Yes | Yes | With Electron shell bridge |
+| Desktop computer use | No | No | No | With Electron shell bridge |
+| Speech synthesis | Browser/OS-dependent | OS-dependent | OS-dependent | OS-dependent |
+| Speech recognition | Browser-dependent | TalkMode/platform-dependent | TalkMode/platform-dependent | Browser/platform-dependent |
+| Pinecall voice calls | Supported with issuer | Supported with permissions | Supported with permissions | Depends on integration |
+| PWA installation | Yes | Via browser | Via browser | No |
+
+“Supported” means the application has an integration path; it does not guarantee that every device, browser, operating system version, model, or provider will support the feature.
+
+## Data lifecycle
+
+### Conversation messages
+
+- The client keeps the active conversation in React state for the current page/session.
+- This repository does not add a database or server-side conversation history.
+- Cloud mode sends the selected messages to the configured cloud provider through the API server.
+- MobileClaw mode sends online messages directly to Anthropic using the key stored by the native plugin.
+- Ollama mode sends the selected messages to the configured Ollama instance through the API server.
+- WebLLM and native llama.cpp modes generate locally, subject to browser/device runtime behavior.
+- The optional Mithi service receives reply text when configured and online; offline speech falls back to an installed device voice.
+- Desktop computer mode sends task text and screenshots to Anthropic after the user confirms the session.
+- Users should avoid entering secrets, financial information, health information, or other sensitive personal data unless they understand the selected provider's handling terms.
+
+### Models and assets
+
+- The avatar model is served as a static client asset and may be cached by the PWA runtime.
+- WebLLM models may be downloaded into browser-managed storage.
+- Native GGUF models are downloaded into the private application data directory on iOS/Android.
+- Model downloads should use HTTPS and a trusted host.
+- Model files are separate from this project's source license and may have their own usage, attribution, and redistribution restrictions.
+
+### Voice and microphone data
+
+- Voice recognition is handled by the selected browser, operating system, or TalkMode integration.
+- Speech synthesis uses installed platform voices.
+- Microphone permission is required for voice input and calls.
+- The project does not define a central audio archive or transcription database; third-party platform services may have their own processing and retention policies.
+
+### Third-party services
+
+Provider behavior is outside this repository's control. Before production use, review the current privacy policy, retention settings, acceptable-use policy, regional availability, and model terms for every cloud, voice, token, hosting, and model provider enabled in the deployment.
+
+## Technology
+
+- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Lucide
+- **3D:** Three.js, React Three Fiber, Drei, GLB assets
+- **Local browser AI:** WebLLM through `use-browser-llm` and WebGPU
+- **Native AI:** `llama-cpp-capacitor` with GGUF models on iOS and Android
+- **Backend:** Node.js 20+, Express 5, CORS, dotenv
+- **Local server AI:** Ollama
+- **Mobile:** Capacitor 8, iOS, Android
+- **Desktop:** Capacitor Electron
+- **PWA:** `vite-plugin-pwa`
+- **Voice:** Capacitor TalkMode, Capacitor speech synthesis, Pinecall
 
 ## Requirements
 
-- Node.js 24 or newer
+### Core development
+
+- Node.js 20 or newer
 - npm
-- A modern browser for web development
-- WebGPU support for WebLLM
-- Ollama, if using Local Ollama
-- Xcode and CocoaPods for iOS builds
-- Android Studio and an Android SDK for Android builds
-- CMake and the Android NDK for native llama.cpp builds
-- Electron Builder toolchain requirements for desktop packaging
+- Git
+- A modern browser
+
+### Optional runtimes
+
+- A WebGPU-capable browser for WebLLM
+- Ollama for local server inference
+- Xcode and CocoaPods for iOS development
+- Android Studio and an Android SDK for Android development
+- A platform-compatible Electron toolchain for desktop packaging
 
 ## Quick start
 
 ### 1. Install dependencies
-
-Install dependencies in the root, client, and server directories:
 
 ```bash
 npm install
@@ -69,276 +214,315 @@ npm install --prefix client
 npm install --prefix server
 ```
 
-### 2. Configure the API server
-
-Copy the server environment template:
+### 2. Configure the server
 
 ```bash
 cp server/.env.example server/.env
 ```
 
-To use Cloud AI, configure the cloud provider key on the API server:
+For hosted inference, set an OpenAI-compatible endpoint and API key in `server/.env`:
 
 ```dotenv
 PORT=3001
 CLIENT_ORIGIN=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost
 CLOUD_API_URL=https://your-provider.example/v1/chat/completions
-CLOUD_API_KEY=your_cloud_provider_api_key
+CLOUD_API_KEY=your_server_side_api_key
 ```
 
-Use an OpenAI-compatible chat-completions endpoint. Set `CLOUD_MODEL_FALLBACKS` in `server/.env` to override the default ordered model list if the endpoint uses different model IDs.
-
-Never commit `server/.env`. It is ignored by Git.
+The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable.
 
 ### 3. Configure the client
-
-Copy the client environment template:
 
 ```bash
 cp client/.env.example client/.env
 ```
 
-For browser development, the default empty API base URL works when the client and API are served behind the same origin. If Vite runs on `http://localhost:5173` and the API runs directly on port `3001`, set:
+The Vite development proxy makes the default browser setup work without an API URL. For a separately hosted API, use:
 
 ```dotenv
 VITE_API_BASE_URL=http://localhost:3001
 VITE_PINECALL_AGENT_ID=shanaya
 ```
 
-For mobile offline inference, set `VITE_OFFLINE_MODEL_URL` to an HTTPS URL hosting a llama.cpp compatible GGUF model, then rebuild the client. The app downloads it into its private sandbox when the user selects **Download offline model**. Keep the model's license and redistribution terms with the download source.
+### 4. Start development
 
-### 4. Start the application
-
-From the project root:
+Run both applications from the repository root:
 
 ```bash
 npm run dev
 ```
 
-This starts:
-
-- The API at `http://localhost:3001`
-- The Vite client at the URL printed by Vite, normally `http://localhost:5173`
-
-You can also start each process separately:
+Or run them independently:
 
 ```bash
-npm run dev:server
 npm run dev:client
+npm run dev:server
 ```
 
-Verify the API is running:
+The client normally runs at `http://localhost:5173`; the API listens at `http://localhost:3001`.
+
+Check the API:
 
 ```bash
 curl http://localhost:3001/api/health
 ```
 
-Expected response:
-
 ```json
 {"status":"ok"}
 ```
 
-## Environment variables
+## Configuration
 
-### Client: `client/.env`
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `VITE_API_BASE_URL` | For a separate API origin | Base URL used for `/api/chat` and the Pinecall token endpoint. For a phone, use a reachable HTTPS URL or your computer's LAN IP during development. |
-| `VITE_PINECALL_AGENT_ID` | For Pinecall calls | Public Pinecall agent slug. Defaults to `shanaya` in the client. |
-| `VITE_OFFLINE_MODEL_URL` | For mobile offline AI | HTTPS URL to the GGUF model downloaded by the iOS/Android app. |
-| `VITE_AVATAR_MODEL_URL` | No | Avatar path. Set to `/models/avatar.draco.glb` after generating the Draco asset and local decoder. |
-
-### Server: `server/.env`
+### Client environment: `client/.env`
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `PORT` | No | API port. Defaults to `3001`. |
-| `CLIENT_ORIGIN` | No | Comma-separated list of allowed CORS origins. |
-| `CLOUD_API_URL` | For Cloud AI | OpenAI-compatible chat-completions endpoint URL. |
-| `CLOUD_API_KEY` | For Cloud AI | Server-side cloud provider API key. |
-| `CLOUD_MODEL_FALLBACKS` | No | Comma-separated cloud models tried in order when a request fails. |
-| `OLLAMA_BASE_URL` | For Ollama | Ollama server URL. Defaults to `http://localhost:11434`. |
-| `OLLAMA_MODEL` | For Ollama | Ollama model name. Defaults to `gurubot/self-after-dark:latest`. |
-| `PINECALL_TOKEN_URL` | For voice calls | Trusted server-side endpoint that returns `{ "token": "...", "server": "..." }`. |
+| `VITE_API_BASE_URL` | Only for a separate API origin | Base URL for `/api/chat` and `/api/pinecall/token`. Leave empty when using the Vite proxy. |
+| `VITE_PINECALL_AGENT_ID` | Only for Pinecall | Public Pinecall agent slug. |
+| `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
+| `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default avatar is `/models/avatar.glb`. |
+| `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
 
-The server's default cloud model fallback list is defined in [`server/index.js`](./server/index.js). Keep the configured model names current for your provider account.
+### Server environment: `server/.env`
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `PORT` | No | `3001` | Express API port. |
+| `CLIENT_ORIGIN` | No | Local origins | Comma-separated CORS allowlist. |
+| `CLOUD_API_URL` | For cloud mode | — | OpenAI-compatible `/chat/completions` endpoint. |
+| `CLOUD_API_KEY` | For cloud mode | — | Server-side provider key. |
+| `CLOUD_MODEL_FALLBACKS` | For cloud mode | — | Comma-separated model IDs accepted by the configured endpoint, attempted in order. |
+| `OLLAMA_BASE_URL` | For Ollama | `http://localhost:11434` | Ollama server URL. |
+| `OLLAMA_MODEL` | For Ollama | `gurubot/self-after-dark:latest` | Ollama model name. |
+| `PINECALL_TOKEN_URL` | For calls | — | Trusted server endpoint returning short-lived Pinecall credentials. |
+| `ANTHROPIC_API_KEY` | For desktop control | — | Server-only key used by the computer-toolset route. |
+| `ANTHROPIC_MODEL` | For desktop control | `claude-sonnet-5-5` | Anthropic model ID with computer-toolset support. |
+| `MITHI_TTS_URL` | Optional | — | Base URL of the Mithi service; the API appends `/synthesize`. |
+
+All environment templates are committed as examples. Actual secrets are ignored by [`.gitignore`](./.gitignore).
 
 ## Inference modes
 
 ### Cloud AI
 
-Cloud requests go through the Express API, which keeps `CLOUD_API_KEY` off the client. Prompts are sent to the configured cloud provider, which applies its own data retention policy. The API requests JSON responses containing a reply and one of Shanaya's supported emotions.
+Cloud mode calls the configured OpenAI-compatible provider through the Express API. This keeps the provider key off the client and allows the server to try the configured model fallback chain.
 
 ### WebLLM Local
 
-WebLLM runs in the browser using WebGPU. The first request may download and initialize the browser model, and browser storage is used for subsequent loads. If WebGPU is unavailable, use Cloud AI, Ollama, or the native mobile mode.
+WebLLM runs in the browser using WebGPU. The first run may download a model and require additional memory. Browser support, model availability, and download persistence depend on the browser.
 
 ### Local Ollama
 
-Install and run Ollama separately, then make sure the selected model is available:
+Install Ollama, start it, and pull the configured model:
 
 ```bash
-ollama pull gurubot/self-after-dark:latest
 ollama serve
+ollama pull gurubot/self-after-dark:latest
 ```
 
-Set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in `server/.env` if your setup differs from the defaults. The browser still talks to the Express API; it does not call Ollama directly.
+Set `OLLAMA_BASE_URL` or `OLLAMA_MODEL` when using a different host or model. The client communicates with Ollama through the API server.
 
-### On-device AI
+### Native offline AI
 
-On-device inference uses `llama-cpp-capacitor` with a GGUF model stored in the private app sandbox. Configure `VITE_OFFLINE_MODEL_URL` and download the model once while online. In offline mode, iOS and Android route prompts to that model. Web browsers and Electron use WebLLM; the native llama.cpp plugin does not provide an Electron runtime.
+On iOS and Android, configure `VITE_OFFLINE_MODEL_URL` with a hosted GGUF model and select the offline model preparation action while online. The model is downloaded into the app's private data directory and loaded through llama.cpp. The model's license, redistribution rights, and download availability are the responsibility of the distributor.
 
-## Voice and speech
+When disconnected, the client chooses native llama.cpp on iOS/Android and WebLLM on web/Electron. A native model must be prepared before going offline.
 
-### Speech replies
+## Agent runtime and device tools
 
-The client can use installed device speech voices for:
+Cloud and Ollama modes use a five-round tool loop. WebLLM and llama.cpp use a JSON tool-request format in the prompt, so the selected local model must follow that format. Tool results appear in the chat as system messages. The router checks network state immediately before each model step.
 
-- English (`en-US`)
-- Hindi (`hi-IN`)
-- Marathi (`mr-IN`)
+On iOS and Android, MobileClaw initializes `capacitor-native-agent`, `capacitor-lancedb`, and `capacitor-mobilecron`. Its vector store uses a local hash embedding fallback and stays in the app sandbox. Add an Anthropic API key in Settings to route online turns through MobileClaw; the native plugin stores the key and sends requests directly to Anthropic. Native turns use MobileClaw's skill runner with an explicit tool allowlist, so its general file, code, and Git tools are not exposed to Shanaya's chat. The registered device tools and memory deletion tool retain their own confirmation checks. Without a key, online requests use the server's configured OpenAI-compatible endpoint. Offline turns use the downloaded GGUF model and can call local memory tools.
 
-Offline device voices are preferred. If no compatible voice is installed, download a voice for the selected language from the operating system's language or accessibility settings.
+The registered device tools are `open_app`, `toggle_setting`, `send_message`, `make_call`, and `get_battery_status`. Shanaya asks before SMS drafts, calls, flashlight changes, and computer input. SMS and calls open the system composer/dialer; the user taps Send or Call. iOS and Android block third-party Wi-Fi and Bluetooth toggles, so Shanaya explains how to change those in system controls. Notification reading and arbitrary file or shell execution are not enabled.
 
-Voice input uses `@elizaos/capacitor-talkmode` on iOS and Android. On web and Electron it uses the browser's Speech Recognition API when available. Shanaya then sends the final transcript through the currently selected inference mode. Speech recognition follows the installed platform recognizer, so offline availability can vary. Speech playback uses the installed OS voice closest to a female voice for the selected locale (`en-US`, `hi-IN`, or `mr-IN`); voice names and availability depend on the device, and Charvi is selected only when it is installed there.
+## Desktop computer use
+
+The Anthropic computer-toolset endpoint runs on the server. After `cap add @capawesome/capacitor-electron`, copy [`client/electron-agent-preload.example.cjs`](./client/electron-agent-preload.example.cjs) and [`client/electron-agent-main.example.cjs`](./client/electron-agent-main.example.cjs) into `client/electron/`, then merge [`client/electron-agent-config.example.ts`](./client/electron-agent-config.example.ts) into the generated `capacitor.electron.config.ts`. Install the optional driver dependencies with `cd client/electron && npm install screenshot-desktop sharp @nut-tree/nut-js esbuild`, then bundle the preload source: `npx esbuild electron-agent-preload.example.cjs --bundle --platform=node --format=cjs --external:electron --outfile=electron-agent-preload.cjs`. The main process shows a native confirmation and issues a one-use token for every screenshot and computer action; the renderer cannot call the OS driver without that token. The combined preload keeps the Capacitor bridge and exposes only the limited screenshot/action methods. The renderer never receives the Anthropic key. Shanaya asks before each keyboard or mouse action, and the UI explains that screenshots and task text go to the configured Anthropic endpoint.
+
+Desktop browser work uses the visible browser through that same computer bridge. A Tauri shell can expose the same `window.shanayaDesktop` screenshot/action interface; this repository includes the Electron adapter example, not a Tauri Rust driver.
+
+## Voice and calls
+
+### Speech input and output
+
+Supported language tags are:
+
+- English: `en-US`
+- Hindi: `hi-IN`
+- Marathi: `mr-IN`
+
+Speech recognition availability is platform-dependent. If `MITHI_TTS_URL` is configured, reply text is sent to that service and synthesized with Mithi v1 Flash's Charvi voice in English, Hindi, or Marathi. Otherwise Shanaya uses an installed system voice. Mithi runs in a separate Python service, not inside the Capacitor speech plugin; system speech remains the offline fallback.
+
+Download the [Oomni/Mithi v1 Flash model](https://huggingface.co/Oomni/mithi-v1-flash) and install its dependencies, including the English spaCy model. Then install this API wrapper and run:
+
+```bash
+pip install -U huggingface_hub
+hf download Oomni/mithi-v1-flash --local-dir ./mithi-v1-flash
+pip install -r ./mithi-v1-flash/requirements.txt
+python -m spacy download en_core_web_sm
+pip install -r server/mithi-service-requirements.txt
+MITHI_MODEL_PATH=./mithi-v1-flash uvicorn server.mithi_tts_service:app --host 0.0.0.0 --port 8010
+```
+
+Set `MITHI_TTS_URL` to the service's base URL in `server/.env`. For a phone, the service must be reachable from that phone through the API server; the phone's `localhost` is the phone itself.
 
 ### Pinecall voice calls
 
-Voice calls require:
+Pinecall calls require:
 
-1. A public agent ID in `VITE_PINECALL_AGENT_ID`
-2. A trusted token issuer configured through `PINECALL_TOKEN_URL`
-3. Internet access
-4. Microphone permission
+1. `VITE_PINECALL_AGENT_ID` in the client environment.
+2. `PINECALL_TOKEN_URL` in the server environment.
+3. A reachable token issuer that returns short-lived credentials.
+4. Internet connectivity and microphone permission.
 
-The token issuer must return JSON in this shape:
+Expected token issuer response:
 
 ```json
 {
   "token": "short-lived-token",
-  "server": "pinecall-server-url",
+  "server": "pinecall-server.example",
   "expires_in": 3600
 }
 ```
 
-Do not expose a Pinecall API key in `client/.env`. The client only requests short-lived call credentials from the server endpoint at `/api/pinecall/token`.
+Never put a Pinecall API key in the client. The client requests credentials from `GET /api/pinecall/token`.
 
-## Mobile builds
+## Mobile and PWA builds
 
-The Capacitor app uses:
+### Capacitor
 
-- App name: `Shanaya`
-- App ID: `com.shanaya.companion`
-- Web output directory: `client/dist`
+The native application is configured as:
 
-Build the client and synchronize native projects:
+| Setting | Value |
+| --- | --- |
+| App name | `Shanaya` |
+| App ID | `com.shanaya.companion` |
+| Web directory | `client/dist` |
+
+Add platforms once:
+
+```bash
+npm run cap:add:ios --prefix client
+npm run cap:add:android --prefix client
+npm run cap:add:electron --prefix client
+```
+
+After adding iOS and Android, sync the installed native plugins:
 
 ```bash
 npm run cap:sync --prefix client
 ```
 
-Add native platforms once:
+After adding Android, add flashlight access to `client/android/app/src/main/AndroidManifest.xml` before `<application>`:
 
-```bash
-npm run cap:add:ios --prefix client
-npm run cap:add:android --prefix client
+```xml
+<uses-permission android:name="android.permission.FLASHLIGHT" />
 ```
 
-Run on a connected device or emulator:
+Build and run:
 
 ```bash
 npm run cap:run:ios --prefix client
 npm run cap:run:android --prefix client
+npm run cap:run:electron --prefix client
 ```
 
-For a physical phone, configure `VITE_API_BASE_URL` with a reachable HTTPS API URL or the development computer's LAN IP. `localhost` on a phone refers to the phone itself, not the computer running the API.
+For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS API URL or the development computer's LAN IP in `VITE_API_BASE_URL`.
 
-### Capacitor and desktop shells
+### PWA
 
-From `client/`, install the Capacitor shell packages and generate the mobile and desktop platforms:
+The Vite configuration registers a PWA with auto-updates and caches the application shell. The avatar GLB is cached with a cache-first runtime strategy. Build the production web bundle with:
 
 ```bash
-npm install @capacitor/core @capacitor/cli @capacitor/ios @capacitor/android
-npm install @capawesome/capacitor-electron
-npx cap add ios
-npx cap add android
-npx cap add @capawesome/capacitor-electron
-cd electron && npm install && cd ..
+npm run build
 ```
 
-For an existing checkout, these platform dependencies are already listed in `client/package.json`. The commands above show the initial platform setup. Commit `client/electron/package-lock.json` after the initial scaffold so desktop dependencies can be installed reproducibly. Then build and package on the matching host OS:
+Preview it with:
 
 ```bash
-npm run cap:sync:electron
-cd electron && npm run pack
+npm run preview --prefix client
 ```
 
-The Capacitor Electron CLI requires its full platform package name for sync/run commands. The generated `electron/electron-builder.config.js` controls targets and signing.
+### Avatar optimization
 
-### Draco avatar and scene budgets
-
-Compress the model geometry and copy a local Draco decoder with:
+The optional Draco pipeline compresses the avatar model and copies decoder assets:
 
 ```bash
 npm run models:draco --prefix client
 ```
 
-This creates `client/public/models/avatar.draco.glb` and copies the decoder files under `client/public/draco/`. Set `VITE_AVATAR_MODEL_URL=/models/avatar.draco.glb` before building to use the compressed file. `AvatarScene` caps the renderer at 2× device pixel ratio. In development, its HUD tracks draw calls, texture count, and estimated texture memory; warnings fire above 150 draw calls, 64 texture objects, or 128 MiB of estimated texture memory. The memory estimate uses image dimensions and texture formats, so actual GPU allocation may differ.
+Set `VITE_AVATAR_MODEL_URL=/models/avatar.draco.glb` when you want to use the generated asset.
 
-### PWA and release builds
+## Deployment
 
-Vite generates the web manifest and service worker during `npm run build --prefix client`. The app shell and avatar model are cached for offline use. The CI workflow in [`.github/workflows/build.yml`](./.github/workflows/build.yml) builds the PWA, Electron packages on macOS/Windows/Linux, Android, and an iOS archive. Configure repository secrets for Android signing, Apple signing/notarization, and Electron code signing before enabling release signing.
+The client and API are separate deployable units:
 
-The Filesystem plugin also requires the iOS privacy manifest in [`client/config/PrivacyInfo.xcprivacy`](./client/config/PrivacyInfo.xcprivacy). The workflow adds it to the generated Xcode app target and adds TalkMode's microphone and speech-recognition usage descriptions. Confirm the manifest and permission strings are present in the archive before submitting.
+```text
+Static hosting / app package
+    └── client/dist
 
-The release workflow reads the public GitHub Actions variables `VITE_API_BASE_URL` and `VITE_OFFLINE_MODEL_URL` when building each platform. Set the first to the deployed API origin for packaged apps; set the second to the public GGUF download URL when mobile offline inference is enabled. Leave either empty when not used.
+Node.js service
+    └── server/index.js
+```
 
-## Available scripts
+### Deploying the API
 
-### Root scripts
+1. Provision a Node.js 20+ runtime.
+2. Install server dependencies:
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Start the client and server together |
-| `npm run dev:client` | Start only the Vite client |
-| `npm run dev:server` | Start only the API server |
-| `npm run build` | Type-check and build the client |
+   ```bash
+   npm install --prefix server
+   ```
 
-### Client scripts
+3. Set production values in the service environment:
 
-Run these with `npm run <script> --prefix client`:
+   ```dotenv
+   NODE_ENV=production
+   PORT=3001
+   CLIENT_ORIGIN=https://app.example.com
+   CLOUD_API_URL=https://provider.example/v1/chat/completions
+   CLOUD_API_KEY=replace_me
+   ```
 
-| Command | Description |
-| --- | --- |
-| `dev` | Start Vite development server |
-| `build` | Run TypeScript build and create the production bundle |
-| `preview` | Preview the production bundle locally |
-| `cap:sync` | Build and synchronize Capacitor projects |
-| `cap:add:ios` | Add the iOS Capacitor platform |
-| `cap:add:android` | Add the Android Capacitor platform |
-| `cap:add:electron` | Add the Capawesome Capacitor Electron platform |
-| `cap:sync:electron` | Build and synchronize the Electron platform |
-| `cap:run:electron` | Build, sync, and run the Electron app |
-| `models:draco` | Compress the avatar geometry and copy local Draco decoders |
-| `cap:run:ios` | Build, sync, and run iOS |
-| `cap:run:android` | Build, sync, and run Android |
+4. Start the server:
 
-### Server scripts
+   ```bash
+   npm start --prefix server
+   ```
 
-Run these with `npm run <script> --prefix server`:
+5. Expose it through HTTPS and set `VITE_API_BASE_URL` to the public API origin when building the client.
 
-| Command | Description |
-| --- | --- |
-| `dev` | Start the API with Node's watch mode |
-| `start` | Start the API normally |
+The API currently has no built-in authentication, rate limiting, request logging policy, user accounts, or persistent storage. Add those controls before exposing it as a public multi-user service.
+
+### Deploying the web client
+
+Build the static bundle:
+
+```bash
+npm run build
+```
+
+Publish `client/dist` to a static host. Configure SPA fallback routing to serve `index.html` for application routes, serve the API from a trusted HTTPS origin, and set `VITE_API_BASE_URL` at build time when the API is not behind the same origin.
+
+### Production deployment checklist
+
+- [ ] Use HTTPS for the client, API, model downloads, and token issuer.
+- [ ] Set `CLIENT_ORIGIN` to exact production origins.
+- [ ] Store API keys in the host's secret manager.
+- [ ] Configure provider timeouts, quotas, and billing alerts.
+- [ ] Add authentication and rate limiting if the API is public.
+- [ ] Add structured logs without recording message content by default.
+- [ ] Confirm CORS, CSP, microphone permissions, and platform privacy declarations.
+- [ ] Confirm the avatar, model, font, and dependency licenses allow the intended distribution.
+- [ ] Verify offline behavior on representative devices.
+- [ ] Test rollback of both the client bundle and API independently.
 
 ## API reference
 
 ### `GET /api/health`
 
-Returns an API health response:
+Returns:
 
 ```json
 {"status":"ok"}
@@ -357,7 +541,7 @@ Request:
 }
 ```
 
-`mode` must be `cloud` or `ollama` for server-side inference. WebLLM and native inference run in the client.
+`mode` is `cloud` or `ollama` for server inference. WebLLM and native inference run in the client.
 
 Successful response:
 
@@ -368,50 +552,261 @@ Successful response:
 }
 ```
 
-The API accepts between 1 and 40 messages, and each message is limited to 4,000 characters.
+The server returns explicit `4xx` or `5xx` errors for invalid input, unavailable providers, invalid model output, or token issuer failures.
+
+### `POST /api/agent`
+
+Accepts `mode`, chat messages, and JSON-schema tools. Returns one assistant message with text and/or tool calls. The client validates the tool name, executes it behind confirmation where required, then submits the tool result for the next agent step.
+
+### `POST /api/desktop/computer`
+
+Uses the server-side Anthropic SDK and `computer_toolset_20260801`; the Electron bridge performs the returned actions. Requires `ANTHROPIC_API_KEY` on the server.
+
+### `POST /api/tts`
+
+Proxies validated text and one of `en`, `hi`, or `mr` to the configured Mithi service and returns WAV audio. When Mithi is not configured, the client falls back to an installed system voice.
 
 ### `GET /api/pinecall/token`
 
-Proxies a request to the configured trusted Pinecall token issuer. Returns `503` when `PINECALL_TOKEN_URL` is not configured and `502` when the issuer fails or returns an invalid response.
+Fetches credentials from the configured trusted Pinecall token issuer. It returns `503` when the issuer is not configured and `502` when the issuer returns an invalid response or cannot be reached.
 
 ## Project structure
 
 ```text
 .
+├── .github/workflows/build.yml       # CI build workflow
 ├── client/
-│   ├── public/models/avatar.glb   # Source 3D avatar asset
-│   ├── src/components/            # Avatar and chat UI
-│   ├── src/services/              # AI, speech, network, and call integrations
-│   ├── .env.example               # Client configuration template
-│   ├── capacitor.config.ts        # Capacitor app configuration
-│   └── vite.config.ts             # PWA manifest and service worker
+│   ├── public/
+│   │   ├── icon.svg                  # PWA/app icon
+│   │   └── models/avatar.glb         # 3D avatar
+│   ├── src/
+│   │   ├── components/               # Chat UI and avatar scene
+│   │   ├── services/                 # AI, network, speech, and calls
+│   │   ├── App.tsx                   # Application composition
+│   │   ├── index.css                 # Global styles
+│   │   └── types.ts                  # Shared client types
+│   ├── config/PrivacyInfo.xcprivacy  # iOS privacy manifest
+│   ├── scripts/                      # Asset/build helpers
+│   ├── .env.example                  # Client configuration template
+│   ├── capacitor.config.ts           # Native app configuration
+│   ├── package.json                  # Client scripts/dependencies
+│   └── vite.config.ts                # Vite/PWA/proxy configuration
 ├── server/
-│   ├── index.js                   # Express API and provider adapters
-│   └── .env.example               # Server configuration template
-├── package.json                   # Root development commands
-├── .github/workflows/build.yml    # Cross-platform build and signing pipeline
+│   ├── .env.example                  # Server configuration template
+│   ├── index.js                     # Express API, agent router, desktop and TTS proxies
+│   ├── mithi_tts_service.py         # Optional Charvi TTS service wrapper
+│   └── package.json                  # Server scripts/dependencies
+├── package.json                     # Root orchestration scripts
+├── LICENSE                           # Source-available project license
 └── README.md
 ```
 
-## Troubleshooting
+## Development
 
-- **The client cannot reach the API:** Set `VITE_API_BASE_URL` correctly and ensure the API is running. For a mobile device, do not use `localhost`.
-- **Cloud requests fail:** Check `CLOUD_API_KEY`, model access, and the configured fallback model names.
-- **Ollama requests fail:** Confirm `ollama serve` is running, the model has been pulled, and `OLLAMA_BASE_URL` is reachable from the API server.
-- **WebLLM is unavailable:** Use a browser with WebGPU enabled, or switch to Cloud AI, Ollama, or native inference.
-- **Native offline AI is unavailable:** Set `VITE_OFFLINE_MODEL_URL`, rebuild, and download the GGUF model while online. Native llama.cpp is supported only in the iOS and Android shells; Electron and browsers use WebLLM.
-- **TalkMode is unavailable:** Check that the platform plugin is installed and synced. Browser speech recognition is only present in supported browser engines.
-- **Speech output does not start:** Enable voice replies, select a language, and install an offline system voice for that language.
-- **Calls cannot connect:** Configure `PINECALL_TOKEN_URL`, verify the token issuer response, grant microphone permission, and check that the agent ID is correct.
+### Available commands
 
-## Security notes
+#### Root
 
-- Keep `CLOUD_API_KEY` and any Pinecall credentials on the server.
-- Do not commit `server/.env`, `client/.env`, or generated native/build directories.
-- Use HTTPS for deployed clients and APIs.
-- Restrict `CLIENT_ORIGIN` to the actual origins that should access the API in production.
-- Use short-lived Pinecall tokens and validate them in the trusted token issuer.
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Run client and server concurrently. |
+| `npm run dev:client` | Run only the Vite client. |
+| `npm run dev:server` | Run only the Express server. |
+| `npm run build` | Build and type-check the client. |
+
+#### Client
+
+Run client commands with `npm run <command> --prefix client`.
+
+| Command | Purpose |
+| --- | --- |
+| `dev` | Start Vite. |
+| `build` | Run `tsc -b` and create the production bundle. |
+| `preview` | Preview the production bundle. |
+| `cap:sync` | Build and synchronize Capacitor. |
+| `cap:add:ios` | Add the iOS platform. |
+| `cap:add:android` | Add the Android platform. |
+| `cap:add:electron` | Add the Electron platform. |
+| `cap:sync:electron` | Build and synchronize Electron. |
+| `cap:run:electron` | Build, sync, and run Electron. |
+| `models:draco` | Compress the avatar asset. |
+| `cap:run:ios` | Build, sync, and run iOS. |
+| `cap:run:android` | Build, sync, and run Android. |
+
+#### Server
+
+Run server commands with `npm run <command> --prefix server`.
+
+| Command | Purpose |
+| --- | --- |
+| `dev` | Run Node with watch mode. |
+| `start` | Run the API server. |
+
+### Adding a new inference provider
+
+1. Add provider configuration to [`server/.env.example`](./server/.env.example).
+2. Keep credentials server-side.
+3. Implement a small provider adapter in [`server/index.js`](./server/index.js).
+4. Normalize output to `{ reply, emotion }`.
+5. Validate provider failures explicitly.
+6. Add the mode to the client inference type and settings UI.
+7. Document setup and limitations here.
+
+### Adding a new voice language
+
+1. Add the locale to [`client/src/types.ts`](./client/src/types.ts).
+2. Add voice selection/preference handling to the speech service.
+3. Add the language to the UI selector.
+4. Test on web and at least one native platform.
+5. Document whether offline recognition and synthesis are supported.
+
+## Testing and quality
+
+The repository currently provides a production build/type-check command rather than a dedicated automated test suite.
+
+Before opening a pull request:
+
+```bash
+npm run build
+git diff --check
+```
+
+Manually verify:
+
+- The API health endpoint responds.
+- Cloud and Ollama requests show useful errors when unavailable.
+- WebLLM reports unsupported WebGPU clearly.
+- Offline mode selects the expected runtime.
+- Avatar emotion changes after an assistant response.
+- Speech permissions and voice failures are surfaced to the user.
+- No secret appears in the client bundle or committed files.
+
+### Recommended future test layers
+
+- **Unit tests:** response parsing, emotion normalization, inference-mode resolution, environment validation, and API input validation.
+- **Component tests:** chat submission states, provider selection, errors, model preparation, and voice controls.
+- **Integration tests:** `/api/health`, `/api/chat`, provider fallbacks, malformed provider output, and Pinecall issuer failures.
+- **End-to-end tests:** a browser smoke test covering startup, message submission, avatar emotion updates, offline fallback, and accessibility basics.
+- **Native smoke tests:** model download interruption/retry, microphone permissions, speech recognition, and app resume behavior.
+
+## Error behavior and observability
+
+The application should show an actionable error when:
+
+- The API is unreachable or returns invalid data.
+- A provider key, endpoint, model, or Ollama server is unavailable.
+- WebGPU is unsupported or a local model is still loading.
+- A native model is not downloaded or cannot be initialized.
+- Speech or microphone permissions are denied.
+- A Pinecall token issuer is missing, unreachable, or returns malformed credentials.
+
+For production operations, monitor availability and latency separately for the client, API, cloud provider, Ollama host, token issuer, and model download host. Log request IDs, status codes, provider names, durations, and error categories without logging message content by default.
+
+## Security and privacy
+
+- Keep `server/.env` and all API keys out of version control.
+- Treat cloud conversations according to the provider's retention and training policy.
+- Local WebLLM, Ollama, and native GGUF modes can keep inference on the user's device or local network.
+- Restrict `CLIENT_ORIGIN` to trusted production origins.
+- Use HTTPS for deployed clients, APIs, model downloads, and token issuers.
+- Use short-lived Pinecall tokens and validate them on a trusted server.
+- Do not redistribute a model unless its license permits redistribution.
+- Report security issues privately instead of opening a public issue with exploit details.
+
+To report a vulnerability, use the repository's GitHub security reporting flow if enabled, or contact the maintainer through the repository profile before public disclosure.
+
+## Troubleshooting and FAQ
+
+### The client starts, but chat requests fail
+
+Confirm that the API is running, `VITE_API_BASE_URL` is correct for the current runtime, and `CLIENT_ORIGIN` includes the exact client origin. In browser development, the Vite `/api` proxy usually avoids the need for `VITE_API_BASE_URL`.
+
+### Why does `localhost` fail on a phone?
+
+On a physical phone, `localhost` points to the phone. Use a reachable HTTPS API URL or the development computer's LAN IP, ensure both devices are on a reachable network, and configure the server's CORS allowlist.
+
+### Why is a local model unavailable?
+
+WebLLM needs a compatible WebGPU implementation and may need time to download a model. Native llama.cpp needs iOS/Android, a valid `VITE_OFFLINE_MODEL_URL`, enough storage, a complete GGUF download, and a model compatible with the runtime.
+
+### Why does the avatar not appear?
+
+Confirm that `client/public/models/avatar.glb` exists, the browser can request `/models/avatar.glb`, and the browser console has no WebGL or asset-loading errors. Large models may take time to load on mobile hardware.
+
+### Why is speech silent?
+
+Enable voice replies, select a supported language, confirm the device has a voice installed for that locale, and check browser or operating-system audio permissions. Speech support is platform-dependent.
+
+### Is this a medical or mental-health service?
+
+No. Shanaya is a software project and is not a substitute for emergency services, a licensed clinician, or professional legal, financial, or medical advice. Integrators are responsible for their user-facing disclosures and safety practices.
+
+### Can I monetize a fork?
+
+Not under the default project license. Read [`LICENSE`](./LICENSE) before distributing or operating a monetized fork. Commercial use requires a separate written license and, unless otherwise agreed, a 25% share of Gross Revenue plus attribution and reporting obligations.
+
+## Contributing
+
+Contributions are welcome.
+
+1. Fork the repository.
+2. Create a focused branch:
+
+   ```bash
+   git checkout -b feature/your-change
+   ```
+
+3. Make the smallest complete change that solves the problem.
+4. Update documentation and environment examples when behavior changes.
+5. Run `npm run build` and `git diff --check`.
+6. Open a pull request describing:
+   - What changed and why
+   - How it was tested
+   - Any platform-specific limitations
+   - Any new environment variables or provider requirements
+
+Please avoid committing generated platform directories, downloaded models, secrets, or unrelated formatting changes.
+
+### Pull request checklist
+
+- [ ] The change has a focused scope and a descriptive title.
+- [ ] Existing behavior is preserved unless the change explicitly documents a behavior change.
+- [ ] Type-check/build passes.
+- [ ] Documentation and `.env.example` files are updated when needed.
+- [ ] New provider or platform behavior has clear error handling.
+- [ ] No secrets, downloaded models, or generated native artifacts are included.
+- [ ] Third-party license and attribution requirements were checked.
+
+### Commit and issue conventions
+
+Use descriptive commit messages and include the affected area when useful, for example `client: improve offline model errors`. Bug reports should include the runtime, operating system, browser/device, reproduction steps, expected behavior, actual behavior, console/API errors, and whether the issue reproduces online or offline.
+
+## Roadmap
+
+- [ ] Add a dedicated automated unit/integration test suite.
+- [ ] Add provider adapter interfaces so new model backends are easier to plug in.
+- [ ] Improve conversation persistence and export controls.
+- [ ] Add configurable model download verification and checksums.
+- [ ] Improve accessibility auditing and keyboard navigation coverage.
+- [ ] Add production deployment examples for the API and PWA.
+- [ ] Publish a formal support matrix for browser, iOS, Android, and Electron versions.
+
+Have an idea? Open a feature request with the use case, proposed behavior, and affected platforms.
 
 ## License
 
-No license has been specified yet. Add a license before distributing or publishing the project for reuse.
+Shanaya is licensed under the [Shanaya Source-Available Non-Commercial License 1.0](./LICENSE).
+
+### Commercial use and monetized forks
+
+This license permits non-commercial use, modification, and redistribution with attribution. It does **not** grant commercial rights.
+
+Anyone who forks, modifies, hosts, distributes, sells, advertises, or otherwise monetizes the project must obtain a separate written commercial license before monetization. Unless that agreement states otherwise, the commercial license requires **25% of Gross Revenue** attributable to the monetized fork or derivative work.
+
+Commercial users must also preserve attribution to **Shanaya contributors / original copyright holder**, provide revenue reports, and comply with the payment and audit provisions in [`LICENSE`](./LICENSE). Unauthorized monetization, non-payment, or attribution removal may result in termination of the license and legal enforcement, subject to applicable law.
+
+This is a **source-available license, not an OSI-approved open-source license**. The governing jurisdiction is currently reserved for a separate written commercial agreement. Obtain legal advice before relying on this license for commercial distribution.
+
+## Acknowledgements
+
+Shanaya is built with open-source technologies including React, Vite, TypeScript, Tailwind CSS, Three.js, React Three Fiber, Capacitor, WebLLM, llama.cpp, Express, Ollama, and Lucide. See the package manifests for the complete dependency list and their respective licenses.

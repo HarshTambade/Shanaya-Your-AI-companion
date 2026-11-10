@@ -1,5 +1,7 @@
 import { SpeechSynthesis } from "@capgo/capacitor-speech-synthesis";
 import type { SpeechLanguage } from "../types";
+import { apiUrl } from "./api";
+import { getNetworkStatus } from "./AIService";
 
 const voiceNames: Record<SpeechLanguage, string[]> = {
   "en-US": ["charvi", "samantha", "aria", "female", "woman"],
@@ -9,6 +11,37 @@ const voiceNames: Record<SpeechLanguage, string[]> = {
 
 export class SpeechService {
   static async speak(text: string, language: SpeechLanguage) {
+    const network = await getNetworkStatus().catch(() => ({ connected: typeof navigator === "undefined" || navigator.onLine }));
+    try {
+      if (!network.connected) throw new Error("Use the installed device voice while offline.");
+      const response = await fetch(apiUrl("/api/tts"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.slice(0, 5000), language }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) {
+        const audioBlob = await response.blob();
+        if (audioBlob.size > 0) {
+          const audioUrl = URL.createObjectURL(audioBlob);
+          try {
+            const audio = new Audio(audioUrl);
+            audio.playbackRate = 0.96;
+            await new Promise<void>((resolve, reject) => {
+              audio.onended = () => resolve();
+              audio.onerror = () => reject(new Error("Mithi audio playback failed."));
+              void audio.play().catch(reject);
+            });
+            return "Charvi · Mithi v1 Flash";
+          } finally {
+            URL.revokeObjectURL(audioUrl);
+          }
+        }
+      }
+    } catch {
+      // The Mithi service is optional; continue with a voice installed on the device.
+    }
+
     const { voices } = await SpeechSynthesis.getVoices();
     const languagePrefix = language.split("-")[0].toLowerCase();
     const offlineVoices = voices.filter(

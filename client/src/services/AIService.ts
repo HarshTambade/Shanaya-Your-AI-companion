@@ -9,8 +9,10 @@ export type OfflineModelStatus = "available" | "downloadable" | "notready" | "un
 
 const modelRelativePath = "models/shanaya.gguf";
 const offlineSystemPrompt = [
-  "You are Shanaya, a warm and emotionally aware AI companion. Keep replies concise and conversational.",
-  'Return only JSON: {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
+  "You are Shanaya, a helpful personal assistant. Keep replies concise and conversational.",
+  'When the user prompt includes JSON schemas for tools and you need one, return only {"toolCalls":[{"name":"tool_name","arguments":{}}]}.',
+  'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
+  "Never claim a device action succeeded unless its result confirms it.",
 ].join(" ");
 
 type LlamaContext = Awaited<ReturnType<typeof initLlama>>;
@@ -123,10 +125,10 @@ export async function generateOfflineReply(messages: ChatMessage[]) {
   const result = await context.completion({
     messages: [
       { role: "system", content: offlineSystemPrompt },
-      ...messages.slice(-8).map(({ role, content }) => ({ role, content: content.slice(0, 700) })),
+      ...messages.slice(-8).filter(({ role }) => role !== "system").map(({ role, content }) => ({ role, content: content.slice(0, 7000) })),
     ],
-    n_predict: 256,
-    temperature: 0.7,
+    n_predict: 512,
+    temperature: 0.3,
   });
   const text = "content" in result ? result.content : result.text;
   if (typeof text !== "string" || !text.trim()) throw new Error("The on-device model returned an empty response.");

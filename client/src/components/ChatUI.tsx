@@ -3,7 +3,7 @@ import { Capacitor } from "@capacitor/core";
 import { useBrowserLLM } from "use-browser-llm";
 import { useCallClient } from "@pinecall/ionic/react";
 import {
-  ArrowUp, Bot, Cpu, Globe2, HardDrive, LockKeyhole, Mic, Phone, PhoneOff,
+  ArrowUp, Bot, Cpu, Globe2, HardDrive, KeyRound, Laptop, LockKeyhole, Mic, Phone, PhoneOff,
   RotateCcw, Settings2, Smartphone, Sparkles, Speaker, VolumeX, X,
 } from "lucide-react";
 import type { ChatMessage, Emotion, InferenceMode, SpeechLanguage } from "../types";
@@ -20,24 +20,22 @@ import { apiUrl } from "../services/api";
 import { SpeechService } from "../services/SpeechService";
 import { VoiceService } from "../services/VoiceService";
 import { pinecallAgentId, shanayaCallClient } from "../services/callClient";
+import { agentRules, runAgentTurn, type AgentActivity } from "../services/AgentRuntime";
+import { clearMobileAgentConversation, getMobileAgentStatus, runMobileAgentTurn, setMobileAgentApiKey } from "../services/MobileAgent";
+import { hasDesktopBridge, runDesktopAgentTurn } from "../services/DesktopAgent";
 
 const WEBLLM_MODEL = "Llama-3.2-1B-Instruct-q4f16_1-MLC";
-const systemPrompt = [
-  "You are a friendly, emotionally aware AI companion. Keep answers concise and engaging.",
-  'Respond only as a JSON object with this exact shape: {"reply":"your message","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
-  "Use one allowed emotion that best matches the tone of your reply. Do not wrap the JSON in markdown.",
-].join(" ");
-
 const welcomeMessage: ChatMessage = {
   role: "assistant",
   content: "Hey, I’m Shanaya. It’s lovely to meet you. What’s on your mind?",
 };
 
 const modeDetails: Record<InferenceMode, { label: string; description: string; icon: typeof Globe2 }> = {
-  cloud: { label: "Cloud AI", description: "Fast hosted responses", icon: Globe2 },
+  cloud: { label: "Agent AI", description: "Cloud model with device tools", icon: Globe2 },
   webllm: { label: "WebLLM Local", description: "Runs in this browser with WebGPU", icon: Cpu },
   ollama: { label: "Local Ollama", description: "Uses your configured Ollama server", icon: HardDrive },
   native: { label: "On-device AI", description: "Runs a downloaded llama.cpp model", icon: Smartphone },
+  desktop: { label: "Desktop Agent", description: "Uses the desktop with confirmation", icon: Laptop },
 };
 
 function normalizeEmotion(value: unknown): Emotion {
@@ -92,6 +90,10 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nativeStatus, setNativeStatus] = useState<OfflineModelStatus>("checking");
   const [isPreparingNative, setIsPreparingNative] = useState(false);
+  const [nativeAgentStatus, setNativeAgentStatus] = useState({ available: false, initialized: false, hasApiKey: false });
+  const [mobileApiKey, setMobileApiKey] = useState("");
+  const [isSavingMobileApiKey, setIsSavingMobileApiKey] = useState(false);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(null);
   const [modelDownloadProgress, setModelDownloadProgress] = useState(0);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -100,6 +102,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const isOnline = useConnectivity();
   const platform = Capacitor.getPlatform();
   const isNative = platform === "ios" || platform === "android";
+  const desktopAvailable = hasDesktopBridge();
   const effectiveMode = resolveInferenceMode(mode, isOnline);
   const localLLM = useBrowserLLM(effectiveMode === "webllm" ? WEBLLM_MODEL : undefined);
   const selectedMode = modeDetails[effectiveMode];
@@ -123,6 +126,10 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   useEffect(() => {
     void refreshNativeStatus();
   }, [isOnline, refreshNativeStatus]);
+
+  useEffect(() => {
+    if (isNative) void getMobileAgentStatus().then(setNativeAgentStatus);
+  }, [isNative]);
 
   useEffect(() => () => {
     void voiceSessionRef.current?.();
@@ -166,27 +173,43 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
     setInput("");
     setError("");
     setIsLoading(true);
+    setAgentActivity({ phase: "thinking", message: "Shanaya is thinking…" });
     if (inputRef.current) inputRef.current.style.height = "auto";
 
     try {
       let result: { reply: string; emotion: Emotion };
-      if (effectiveMode === "webllm") {
-        const generated = await localLLM.generate([{ role: "system", content: systemPrompt }, ...nextMessages]);
-        result = parseAIResponse(generated);
-      } else if (effectiveMode === "native") {
-        result = parseAIResponse(await generateOfflineReply(nextMessages));
+      const publishActivity = (message: string, acting = false) => {
+        setAgentActivity({ phase: acting ? "acting" : "thinking", message });
+        if (!acting && message && !message.toLowerCase().includes("thinking") && !message.toLowerCase().includes("examining") && !message.toLowerCase().includes("screenshot")) {
+          setMessages((current) => [...current, { role: "system", content: message }]);
+        }
+      };
+
+      if (effectiveMode === "desktop") {
+        const reply = await runDesktopAgentTurn(content, publishActivity);
+        result = parseAIResponse(reply);
+      } else if (effectiveMode === "cloud" && isNative && isOnline && nativeAgentStatus.hasApiKey) {
+        const response = await runMobileAgentTurn(content, publishActivity);
+        result = parseAIResponse(response);
       } else {
-        const response = await fetch(apiUrl("/api/chat"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: effectiveMode, messages: nextMessages }),
+        result = await runAgentTurn({
+          mode: effectiveMode,
+          messages: nextMessages,
+          generateLocal: async (prompt, routeMode) => {
+            if (routeMode === "webllm") {
+              return localLLM.generate([{ role: "system", content: agentRules }, { role: "user", content: prompt }]);
+            }
+            if (routeMode === "native") return generateOfflineReply([{ role: "user", content: prompt }]);
+            throw new Error("The selected agent mode is unavailable.");
+          },
+          onActivity: (activity) => {
+            setAgentActivity(activity);
+            if (activity.phase === "tool-result") setMessages((current) => [...current, { role: "system", content: activity.message }]);
+          },
         });
-        const data: { reply?: unknown; emotion?: unknown; error?: string } = await response.json();
-        if (!response.ok) throw new Error(data.error || "I couldn’t reach the companion service.");
-        result = parseAIResponse(data);
       }
 
-      setMessages([...nextMessages, { role: "assistant", content: result.reply }]);
+      setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
       onEmotionChange(result.emotion);
       if (speakReply) {
         void SpeechService.speak(result.reply, speechLanguage)
@@ -197,7 +220,23 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       setError(requestError instanceof Error ? requestError.message : "Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
+      setAgentActivity(null);
       inputRef.current?.focus();
+    }
+  };
+
+  const saveMobileAgentKey = async () => {
+    setIsSavingMobileApiKey(true);
+    setError("");
+    try {
+      await setMobileAgentApiKey(mobileApiKey);
+      setMobileApiKey("");
+      setNativeAgentStatus({ available: true, initialized: true, hasApiKey: true });
+      setVoiceStatus("Native agent connected. Online conversations use Anthropic and its retention policy.");
+    } catch (keyError) {
+      setError(keyError instanceof Error ? keyError.message : "Could not save the native agent key.");
+    } finally {
+      setIsSavingMobileApiKey(false);
     }
   };
 
@@ -280,6 +319,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
     setInput("");
     setVoiceStatus("");
     onEmotionChange("neutral");
+    void clearMobileAgentConversation().catch(() => undefined);
   };
 
   const nativeStatusLabel = nativeStatus === "available"
@@ -346,12 +386,12 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         </div>
 
         {isSettingsOpen && (
-          <div className="absolute bottom-[calc(100%+0.5rem)] right-3 z-40 w-[min(380px,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-[#111622]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl md:right-[max(calc((100vw-42rem)/2),1rem)]">
+          <div className="absolute bottom-[calc(100%+0.5rem)] right-3 z-40 max-h-[min(75dvh,42rem)] w-[min(380px,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-white/10 bg-[#111622]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl md:right-[max(calc((100vw-42rem)/2),1rem)]">
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-300">
               <Cpu size={14} className="text-violet-300" /> Inference mode
             </div>
             <div className="space-y-2">
-              {(Object.keys(modeDetails) as InferenceMode[]).map((option) => {
+              {(Object.keys(modeDetails) as InferenceMode[]).filter((option) => option !== "desktop" || desktopAvailable).map((option) => {
                 const detail = modeDetails[option];
                 const Icon = detail.icon;
                 const unavailableNativeOption = option === "native" && !isNative;
@@ -404,6 +444,32 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               </p>
             )}
 
+            {isNative && (
+              <div className="mt-3 rounded-xl border border-violet-300/10 bg-violet-300/[0.035] p-3">
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-300">
+                  <KeyRound size={13} className="text-violet-200" /> Native agent runtime
+                  <span className={`ml-auto h-1.5 w-1.5 rounded-full ${nativeAgentStatus.hasApiKey ? "bg-emerald-400" : "bg-slate-600"}`} />
+                </div>
+                {nativeAgentStatus.hasApiKey ? (
+                  <p className="text-[11px] leading-relaxed text-slate-400">MobileClaw is ready with private on-device vector memory. Online agent requests go directly to Anthropic using its retention policy.</p>
+                ) : (
+                  <>
+                    <p className="mb-2 text-[11px] leading-relaxed text-slate-500">Add an Anthropic API key to use the native Rust agent and its on-device LanceDB memory. The key is stored by the native agent plugin.</p>
+                    <div className="flex gap-2">
+                      <input type="password" value={mobileApiKey} onChange={(event) => setMobileApiKey(event.target.value)} placeholder="Anthropic API key" aria-label="Anthropic API key" autoComplete="off" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-violet-300/30" />
+                      <button type="button" onClick={() => void saveMobileAgentKey()} disabled={!mobileApiKey.trim() || isSavingMobileApiKey} className="rounded-lg bg-violet-400/15 px-3 text-xs font-medium text-violet-100 disabled:opacity-40">{isSavingMobileApiKey ? "Saving…" : "Connect"}</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {effectiveMode === "desktop" && (
+              <div className="mt-3 rounded-lg border border-amber-200/10 bg-amber-200/[0.04] px-3 py-2 text-xs leading-relaxed text-amber-100/75">
+                Desktop screenshots and task instructions are sent to the configured Anthropic API. Shanaya asks before each keyboard or mouse action.
+              </div>
+            )}
+
             <div className="mt-3 rounded-xl border border-white/[0.06] bg-black/15 p-3">
               <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-300">
                 <LockKeyhole size={13} className="text-emerald-300" /> Privacy and voice
@@ -411,7 +477,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               <p className="text-[11px] leading-relaxed text-slate-500">
                 {!isOnline
                   ? "Offline messages use WebLLM in browsers and a downloaded llama.cpp model in the iOS or Android app. Those prompts stay on this device. Speech input uses the platform recognizer, whose offline support varies."
-                  : "WebLLM and llama.cpp process prompts locally. Ollama sends prompts to its configured endpoint. Cloud AI sends prompts to our configured provider, whose retention policy applies. Speech input uses the platform recognizer. Voice calls use Pinecall over the internet. Speech playback uses an installed system voice for the selected language."}
+                  : "WebLLM and llama.cpp process prompts locally. Ollama sends prompts to its configured endpoint. Agent AI sends prompts and tool requests to the configured provider. The native MobileClaw option sends prompts directly to Anthropic. If Mithi TTS is configured, reply text is sent to that service; otherwise installed system voices are used. Voice calls use Pinecall over the internet."}
               </p>
             </div>
           </div>
@@ -428,6 +494,8 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         <div className="mx-auto flex max-w-[580px] flex-col gap-3">
           {messages.map((message, index) => {
             const isUser = message.role === "user";
+            const isSystem = message.role === "system";
+            if (isSystem) return <div key={`${index}-system`} role="status" className="mx-8 rounded-xl border border-emerald-300/10 bg-emerald-300/[0.035] px-3 py-2 text-[10px] leading-relaxed text-emerald-100/70">{message.content}</div>;
             return (
               <div key={`${index}-${message.role}`} className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
                 {!isUser && <div className="mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-violet-300/15 bg-violet-400/[0.08] text-violet-200"><Sparkles size={11} /></div>}
@@ -443,7 +511,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
               <span className="typing-dot h-1.5 w-1.5 rounded-full bg-violet-300" />
               {effectiveMode === "webllm" && localLLM.status === "loading"
                 ? `Loading local model · ${Math.round(localLLM.progress * 100)}%`
-                : isLoading ? "Shanaya is thinking…" : ""}
+                : isLoading ? agentActivity?.message || "Shanaya is thinking…" : ""}
             </div>
           )}
 
@@ -550,9 +618,11 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         </form>
         <p className="mt-1.5 text-center text-[9px] text-slate-500">
           {effectiveMode === "cloud"
-            ? "Cloud AI · provider retention policy applies"
+            ? isNative && nativeAgentStatus.hasApiKey ? "MobileClaw agent · Anthropic retention policy applies" : "Agent AI · configured provider retention policy applies"
             : effectiveMode === "ollama"
               ? "Ollama · prompts go to your configured endpoint"
+              : effectiveMode === "desktop"
+                ? "Desktop agent · screenshots go to Anthropic; actions need confirmation"
               : "On-device inference · messages stay on this device"}
         </p>
       </div>

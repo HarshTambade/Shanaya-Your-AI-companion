@@ -26,7 +26,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: client/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: client
       - run: npm run models:draco
         working-directory: client
@@ -53,7 +53,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: client/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: client
       - run: npm run models:draco
         working-directory: client
@@ -96,8 +96,9 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager "ndk;29.0.13113456" "cmake;3.22.1"
-      - run: npm ci
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;29.0.13113456 cmake;3.22.1"
+      - run: npm ci --ignore-scripts
         working-directory: client
       - run: npm run models:draco
         working-directory: client
@@ -142,7 +143,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: client/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
         working-directory: client
       - run: npm run models:draco
         working-directory: client

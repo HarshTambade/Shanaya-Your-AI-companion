@@ -1,0 +1,191 @@
+Shanaya Source-Available Non-Commercial License 1.0
+
+Copyright (c) 2026 Shanaya contributors
+Original copyright holder: Shanaya contributors / original copyright holder
+
+IMPORTANT NOTICE
+
+This is a source-available license, not an OSI-approved open-source license.
+It is a copyright license and not legal advice. The revenue-sharing, audit,
+termination, and enforcement provisions should be reviewed and finalized by a
+qualified attorney in the jurisdictions where the Software will be used or
+commercialized. The governing jurisdiction is intentionally reserved for a
+separate written commercial agreement.
+
+1. DEFINITIONS
+
+"Software" means the source code, documentation, configuration, and other
+materials in this repository that are identified as licensed under this
+License.
+
+"Licensor" means Shanaya contributors and the original copyright holder.
+
+"You" means an individual or legal entity exercising rights under this
+License.
+
+"Derivative Work" means a work based on, incorporating, modifying, adapting,
+translating, or materially interacting with the Software, including a fork,
+modified version, hosted service, application, package, or product that
+contains or is materially derived from the Software.
+
+"Gross Revenue" means all amounts received or receivable from customers or
+other users in connection with a Monetized Fork or Derivative Work, before
+deducting costs, expenses, taxes, payment-processing charges, advertising
+costs, hosting costs, refunds, discounts, salaries, or other deductions.
+Amounts collected as taxes and remitted directly to a governmental authority
+may be excluded from Gross Revenue.
+
+"Monetized Fork" means any Fork or Derivative Work that is directly or
+indirectly used to generate money or other economic value, including through
+sales, subscriptions, licensing, paid downloads, hosted access, advertising,
+sponsorships, donations tied to access or functionality, paid support,
+consulting, marketplace distribution, or bundling with a paid product or
+service.
+
+2. NON-COMMERCIAL GRANT
+
+Subject to this License, the Licensor grants You a worldwide, royalty-free,
+non-exclusive, non-transferable license to use, reproduce, study, modify, and
+distribute the Software and non-commercial Derivative Works, provided that:
+
+a. Your use is genuinely non-commercial and does not operate as a Monetized
+   Fork;
+b. You retain this License and all copyright, attribution, and notice files;
+c. You clearly identify substantial modifications;
+d. You do not imply endorsement by, affiliation with, or official status from
+   the Licensor; and
+e. You do not remove or obscure the required attribution.
+
+Non-commercial use includes personal experimentation, education, research,
+evaluation, and non-commercial community collaboration. It does not include
+use by a business where the Software is used to promote, support, or generate
+revenue for that business, even if the Software itself is offered without a
+separate charge.
+
+3. COMMERCIAL AND MONETIZED USE
+
+You may not create, distribute, operate, sell, license, host, or otherwise
+commercialize a Monetized Fork under this License.
+
+To commercialize a Monetized Fork, You must obtain a separate written
+commercial license from the Licensor before monetization begins. Unless a
+different percentage is expressly agreed in that written commercial license,
+the commercial license requires payment to the Licensor of twenty-five percent
+(25%) of Gross Revenue attributable to the Monetized Fork.
+
+The 25% revenue share applies to every Monetized Fork and Derivative Work
+based on or incorporating the Software, regardless of whether the fork is
+renamed, substantially modified, bundled with other software, accessed through
+an API, or offered as a hosted service.
+
+No commercial rights are granted by merely publishing a fork, accepting
+contributions, adding a notice, or offering the fork under a different
+license. A commercial license may include different payment terms, reporting
+requirements, territory, duration, support terms, warranties, or other
+conditions only when signed or otherwise expressly accepted in writing by the
+Licensor.
+
+4. REVENUE REPORTING AND PAYMENT
+
+Unless a separate written commercial license states otherwise:
+
+a. You must notify the Licensor before launching or monetizing a Monetized
+   Fork;
+b. You must provide a good-faith quarterly report showing Gross Revenue and
+   the calculation of the 25% share;
+c. You must pay the applicable share within thirty (30) days after the end of
+   each calendar quarter;
+d. You must keep commercially reasonable records supporting the reports for
+   at least three (3) years; and
+e. The Licensor may, on reasonable notice and no more than once per calendar
+   year, request an independent review of records relevant to the revenue
+   calculation. If an underpayment of more than five percent (5%) is found,
+   You must pay the shortfall and reasonable review costs.
+
+Payment instructions, currency, tax treatment, and the final method of
+allocating revenue must be specified in the separate commercial agreement.
+Until that agreement is executed, You must not monetize the Software.
+
+5. ATTRIBUTION AND LOYALTY
+
+Every copy, fork, Derivative Work, documentation set, product page, hosted
+service, application settings page, or marketplace listing that contains or
+is materially derived from the Software must include substantially the
+following notice in a prominent and reasonably accessible location:
+
+"Powered by or derived from Shanaya — Your AI Companion. Original project and
+copyright holder: Shanaya contributors / original copyright holder."
+
+You must preserve the project name and attribution history in source
+distributions. You may not present a fork as the official Shanaya project or
+suggest that the Licensor endorses the fork without prior written permission.
+
+The Licensor encourages responsible collaboration, meaningful attribution,
+upstream improvements, and good-faith communication. These expectations do not
+replace the enforceable license conditions, revenue obligations, or any
+separate commercial agreement.
+
+6. CONTRIBUTIONS
+
+Unless a contribution agreement says otherwise, a contribution submitted to
+the project is provided under this License and the contributor represents
+that they have the right to submit it. Contributors retain ownership of their
+contributions, subject to the rights granted to the Licensor and other users
+under this License.
+
+7. TERMINATION
+
+The rights granted under this License terminate automatically if You
+materially breach its terms, including by monetizing without a commercial
+license, failing to pay the required revenue share, or removing attribution.
+
+For breaches that can be cured, the Licensor may provide written notice and a
+thirty (30) day cure period. If the breach is not cured within that period,
+termination becomes effective. Upon termination, You must stop exercising the
+rights granted by this License and stop distributing or operating the
+infringing Monetized Fork, except where applicable law requires otherwise.
+
+Termination does not waive accrued payment obligations or prevent the Licensor
+from pursuing remedies available under applicable law. The Licensor may seek
+injunctive relief, damages, recovery of unpaid revenue share, reasonable
+enforcement costs, or other remedies permitted by applicable law.
+
+8. THIRD-PARTY MATERIALS
+
+The Software may include or depend on third-party libraries, models, assets,
+services, and APIs. Those materials are not automatically covered by this
+License and remain subject to their own terms. You are responsible for
+reviewing and complying with all applicable third-party licenses, model terms,
+trademark requirements, privacy obligations, and platform rules.
+
+9. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, NON-INFRINGEMENT,
+SECURITY, ACCURACY, OR AVAILABILITY. YOU ARE SOLELY RESPONSIBLE FOR YOUR USE
+OF THE SOFTWARE, YOUR AI OUTPUTS, YOUR DATA, AND YOUR COMPLIANCE WITH
+APPLICABLE LAW.
+
+10. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR AND
+CONTRIBUTORS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, REVENUE,
+DATA, GOODWILL, OR BUSINESS INTERRUPTION, ARISING FROM OR RELATED TO THE
+SOFTWARE OR THIS LICENSE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+11. GOVERNING LAW AND DISPUTES
+
+The governing law, venue, dispute-resolution process, and service address are
+reserved for a separate written commercial agreement and should be completed
+by the Licensor with qualified legal counsel before commercial enforcement.
+Nothing in this section limits any non-waivable rights under applicable law.
+
+12. RESERVATION OF RIGHTS
+
+All rights not expressly granted by this License are reserved by the Licensor.
+The Licensor may publish future versions of this License or offer separate
+commercial licenses. A new version does not retroactively change the terms
+applicable to rights already granted under this version unless You expressly
+accept the new terms.

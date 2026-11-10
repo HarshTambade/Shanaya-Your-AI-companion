@@ -5,4 +5,5 @@ interface ImportMetaEnv {
   readonly VITE_PINECALL_AGENT_ID?: string;
   readonly VITE_OFFLINE_MODEL_URL?: string;
   readonly VITE_AVATAR_MODEL_URL?: string;
+  readonly VITE_SHANAYA_ANTHROPIC_MODEL?: string;
 }
