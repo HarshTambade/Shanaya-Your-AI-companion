@@ -193,9 +193,6 @@ jobs:
             || /usr/libexec/PlistBuddy -c 'Add :NSSpeechRecognitionUsageDescription string Shanaya uses speech recognition to transcribe voice messages.' "$INFO"
       - run: npx cap sync ios
         working-directory: client
-      - name: Install iOS pods
-        working-directory: client/ios/App
-        run: pod install --repo-update
       - name: Import Apple signing certificate
         if: vars.IOS_SIGNING_ENABLED == 'true'
         uses: apple-actions/import-codesign-certs@v7

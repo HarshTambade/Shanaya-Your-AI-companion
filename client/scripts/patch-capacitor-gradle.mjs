@@ -17,6 +17,7 @@ const kotlinBuildscript = `buildscript {
 
 const moduleGradleFiles = [
   "node_modules/capacitor-lancedb/android/build.gradle",
+  "node_modules/capacitor-mobile-claw/android/build.gradle",
   "node_modules/capacitor-native-agent/android/build.gradle",
 ];
 
