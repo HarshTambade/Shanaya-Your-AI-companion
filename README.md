@@ -84,23 +84,39 @@ Shanaya is designed around a few principles that should guide new features:
 ```mermaid
 flowchart TD
     User["User"] --> Surface{"Web / PWA / iOS / Android / Electron"}
-    Surface --> Client["React + Vite client"]
-    Client --> UI["ChatUI"]
+    Surface --> Client["Client service<br/>React + Vite"]
+    Client --> UI["ChatUI + agent runtime"]
     Client --> Avatar["Three.js avatar"]
-    Client --> Local{"Offline or local mode"}
-    Client --> API["Express API"]
+    Client --> Local{"Local or offline route"}
+    Client --> Vercel["Vercel public routing"]
+    Vercel --> API["Server service<br/>Express API"]
     Local --> WebLLM["WebLLM + WebGPU"]
-    Local --> Llama["llama.cpp + GGUF on iOS/Android"]
+    Local --> Llama["llama.cpp + GGUF<br/>iOS / Android"]
+    Local --> NativeAgent["MobileClaw + LanceDB + MobileCron<br/>iOS / Android"]
     API --> Cloud["OpenAI-compatible cloud API"]
     API --> Ollama["Ollama"]
+    API --> TTS["Optional Mithi TTS"]
     API --> Pinecall["Pinecall token issuer"]
-    Cloud --> Result["reply + emotion"]
+    Cloud --> Result["reply + emotion / tool calls"]
     Ollama --> Result
     WebLLM --> Result
     Llama --> Result
+    NativeAgent --> Result
     Result --> Client
     Client --> Avatar
 ```
+
+### Vercel service topology
+
+The root [`vercel.json`](./vercel.json) defines two services in one Vercel project:
+
+```text
+Incoming request
+├── /api/*  ──> server service (Express)
+└── /*      ──> client service (Vite static output)
+```
+
+The `client` service is public at `/`. The `server` service is internal by default and is exposed only through the `/api/*` rewrite. No service binding is required: the browser uses relative `/api/*` URLs, while the API calls external providers directly. If a future service calls another internal Vercel service, add a service binding to the calling service and read the injected environment variable at function runtime.
 
 ### Responsibilities by layer
 
@@ -476,6 +492,17 @@ The GitHub Actions workflow builds the web, mobile, and Electron targets on pull
 
 The in-app Downloads menu opens the Actions workflow by default. Set the platform URL variables in `client/.env` to point to stable release pages, store listings, or direct installers. Vite embeds these links at build time, so rebuild the client after changing them.
 
+### CI build safeguards
+
+The GitHub Actions workflow in [`.github/workflows/build.yml`](./.github/workflows/build.yml) uses Node 24 and builds the client on every pull request, push to `main`, version tag, and manual dispatch.
+
+- **Web/PWA:** installs with lifecycle scripts disabled, generates the Draco avatar, and uploads `shanaya-web-pwa`.
+- **Electron:** generates the Capacitor Electron project, vendors runtime plugins, and ignores invalid directory-valued certificate settings so unsigned builds can still complete when signing secrets are absent.
+- **Android:** installs SDK 36, NDK 29, and CMake 3.22.1; applies the Kotlin Gradle patch after Capacitor generates the native project; uploads debug or signed release APKs.
+- **iOS:** applies the native-agent zlib linker patch before project generation, adds privacy and speech permission metadata, archives the generated Xcode project/workspace, and uploads an Xcode archive.
+
+The native patch scripts modify only dependency files under `client/node_modules`; they are not source changes to the third-party packages and are rerun after clean installs.
+
 ### PWA
 
 The Vite configuration registers a PWA with auto-updates and caches the application shell. The avatar GLB is cached with a cache-first runtime strategy. Build the production web bundle with:
@@ -511,6 +538,31 @@ Static hosting / app package
 Node.js service
     └── server/index.js
 ```
+
+### Vercel deployment
+
+This repository is configured as a Vercel multi-service project:
+
+| Service | Root | Framework | Install | Build/output | Traffic |
+| --- | --- | --- | --- | --- | --- |
+| `client` | `client` | Vite | `npm install --ignore-scripts` | `npm run build` → `dist` | Public at `/` |
+| `server` | `server` | Express | `npm install` | Vercel Express detection | Public only through `/api/*` |
+
+The client uses `npm install --ignore-scripts` because a transitive Eliza package currently publishes a lifecycle script that references a missing `scripts/ensure-platform-deps.mjs` file. The application does not depend on that lifecycle action. Keep this workaround in sync with CI until the upstream package is corrected or replaced.
+
+To deploy:
+
+1. Import the repository into Vercel.
+2. Use the root directory containing [`vercel.json`](./vercel.json).
+3. Configure client variables such as `VITE_PINECALL_AGENT_ID` and `VITE_API_BASE_URL` only when an external API origin is required. With the configured rewrites, leave `VITE_API_BASE_URL` empty so the browser uses the same-domain `/api` route.
+4. Configure server secrets such as `CLOUD_API_URL`, `CLOUD_API_KEY`, `OLLAMA_BASE_URL`, `PINECALL_TOKEN_URL`, and optional TTS variables in the server service environment.
+5. Deploy and verify:
+
+   ```bash
+   curl https://your-domain.example/api/health
+   ```
+
+`vercel dev` runs both services locally and is the preferred way to test service rewrites before deployment. Vercel service bindings are runtime-only; do not expect their injected URLs to exist during the client build.
 
 ### Deploying the API
 
@@ -564,6 +616,7 @@ Publish `client/dist` to a static host. Configure SPA fallback routing to serve 
 - [ ] Confirm the avatar, model, font, and dependency licenses allow the intended distribution.
 - [ ] Verify offline behavior on representative devices.
 - [ ] Test rollback of both the client bundle and API independently.
+- [ ] Confirm Vercel service routing sends `/api/*` to Express and all other paths to the Vite output.
 
 ## API reference
 
@@ -671,6 +724,8 @@ Run client commands with `npm run <command> --prefix client`.
 | `build` | Run `tsc -b` and create the production bundle. |
 | `preview` | Preview the production bundle. |
 | `cap:sync` | Build and synchronize Capacitor. |
+| `cap:patch:android` | Add the Kotlin Gradle plugin classpath to affected third-party Android modules. |
+| `cap:patch:ios` | Add the system zlib linker requirement to the native-agent iOS package metadata. |
 | `cap:add:ios` | Add the iOS platform. |
 | `cap:add:android` | Add the Android platform. |
 | `cap:add:electron` | Add the Electron platform. |
