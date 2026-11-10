@@ -3,11 +3,15 @@
   "services": {
     "client": {
       "root": "client",
-      "framework": "vite"
+      "framework": "vite",
+      "installCommand": "npm install --ignore-scripts",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist"
     },
     "server": {
       "root": "server",
-      "framework": "express"
+      "framework": "express",
+      "installCommand": "npm install"
     }
   },
   "rewrites": [
