@@ -47,12 +47,15 @@ function normalizeStep(data: any): AgentStep {
   };
 }
 
-async function requestAgentStep(url: string, body: Record<string, unknown>, timeoutMs = 12_000): Promise<AgentStep> {
+async function requestAgentStep(url: string, body: Record<string, unknown>, timeoutMs = 12_000, groqApiKey?: string): Promise<AgentStep> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(groqApiKey ? { "X-Groq-API-Key": groqApiKey } : {}),
+      },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -127,7 +130,7 @@ export class LLMRouter {
     return resolveInferenceMode(preferred, browserConnected && network.connected);
   }
 
-  static async requestStep(mode: Extract<InferenceMode, "cloud" | "ollama">, messages: AgentMessage[], tools: ShanayaTool[], model?: string): Promise<AgentStep> {
+  static async requestStep(mode: Extract<InferenceMode, "cloud" | "ollama">, messages: AgentMessage[], tools: ShanayaTool[], model?: string, groqApiKey?: string): Promise<AgentStep> {
     const body = {
       mode,
       ...(mode === "cloud" && model ? { model } : {}),
@@ -135,7 +138,7 @@ export class LLMRouter {
       tools: tools.map(({ name, description, inputSchema }) => ({ type: "function", function: { name, description, parameters: inputSchema } })),
     };
     try {
-      return await requestAgentStep(apiUrl("/api/agent"), body, 12_000);
+      return await requestAgentStep(apiUrl("/api/agent"), body, 12_000, mode === "cloud" ? groqApiKey : undefined);
     } catch (primaryError) {
       if (mode !== "cloud" || !shouldUsePythonFallback(primaryError)) throw primaryError;
       // If the connection dropped during the cloud request, let AgentRuntime

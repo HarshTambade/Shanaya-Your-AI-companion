@@ -4,8 +4,8 @@ const brandName = "Shanaya";
 
 const pages = {
   home: {
-    title: "Shanaya AI Companion | 3D Avatar, Voice Chat & Local AI",
-    description: "Meet Shanaya, a multilingual AI companion with an expressive 3D avatar, voice chat, cloud AI, WebLLM, and optional on-device inference for web, mobile, and desktop.",
+    title: "Shanaya — Your AI Companion | 3D Avatar & Voice Chat",
+    description: "Meet Shanaya, an expressive AI companion for thoughtful conversation, multilingual voice chat, and a living 3D avatar. Bring your own Groq key to begin.",
   },
   about: {
     title: "About Shanaya | Private AI Companion with Voice & 3D Avatar",
@@ -59,6 +59,14 @@ function structuredData(siteOrigin: string, pagePath: string, page: (typeof page
         text: "Shanaya supports the web and PWA, with Capacitor-based Android and iOS builds and an Electron desktop shell for macOS, Windows, and Linux.",
       },
     },
+    {
+      "@type": "Question",
+      name: "Do I need a Groq API key to talk to Shanaya?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "The web app asks visitors to provide their own Groq API key before entering the companion. It stays in page memory for the current visit and is sent through the app API only for Groq requests.",
+      },
+    },
   ];
   const graph = {
     "@context": "https://schema.org",
@@ -95,7 +103,7 @@ function structuredData(siteOrigin: string, pagePath: string, page: (typeof page
         featureList: [
           "Responsive 3D avatar with emotion-aware expressions",
           "English, Hindi, and Marathi voice interaction",
-          "Groq cloud inference with optional local AI modes",
+          "Bring-your-own-key Groq cloud inference with optional local AI modes",
           "Confirmation prompts for supported sensitive device actions",
         ],
       },

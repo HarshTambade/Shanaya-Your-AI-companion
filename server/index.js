@@ -24,7 +24,14 @@ const corsOrigin = (origin, callback) => {
 };
 const defaultGroqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 const cloudApiUrl = process.env.GROQ_API_URL || process.env.CLOUD_API_URL || defaultGroqApiUrl;
-const isGroqProvider = cloudApiUrl.startsWith("https://api.groq.com/");
+const isGroqProvider = (() => {
+  try {
+    const url = new URL(cloudApiUrl);
+    return url.protocol === "https:" && url.hostname === "api.groq.com" && !url.port;
+  } catch {
+    return false;
+  }
+})();
 const defaultGroqModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 const cloudApiKey = isGroqProvider
   ? process.env.GROQ_API_KEY || process.env.CLOUD_API_KEY
@@ -62,6 +69,23 @@ const cloudRequestTimeout = Math.max(3_000, Math.min(120_000, Number(process.env
 const cloudProvider = isGroqProvider ? "Groq" : "Custom";
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "gurubot/self-after-dark:latest";
+
+function getRequestCloudApiKey(req) {
+  const suppliedKey = req.get("x-groq-api-key")?.trim();
+  if (!suppliedKey) return cloudApiKey;
+  // A visitor-provided Groq key may only go to Groq's official HTTPS API.
+  if (!isGroqProvider) {
+    const error = new Error("Visitor-provided Groq keys require the official Groq API endpoint.");
+    error.status = 400;
+    throw error;
+  }
+  if (suppliedKey.length > 512 || /[\r\n]/.test(suppliedKey)) {
+    const error = new Error("The Groq API key is invalid.");
+    error.status = 400;
+    throw error;
+  }
+  return suppliedKey;
+}
 const systemPrompt = [
   "You are Shanaya, a warm, candid, nonjudgmental companion and capable personal assistant. Be open to creative role-play and frank discussion without unnecessary moralizing.",
   "Take initiative within the user's stated request and use available tools to complete bounded multi-step tasks. Ask a follow-up only when an important detail is missing.",
@@ -160,8 +184,8 @@ function isNetworkFailure(error) {
     || ["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EAI_AGAIN", "ETIMEDOUT"].includes(code);
 }
 
-async function requestCloud(messages, models = cloudModels) {
-  if (!cloudApiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
+async function requestCloud(messages, models = cloudModels, apiKey = cloudApiKey) {
+  if (!apiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
 
   let lastError;
   for (const model of models) {
@@ -169,7 +193,7 @@ async function requestCloud(messages, models = cloudModels) {
       const response = await fetch(cloudApiUrl, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${cloudApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -196,6 +220,7 @@ async function requestCloud(messages, models = cloudModels) {
         console.warn(`Cloud model ${model} could not reach its provider; skipping the remaining cloud models.`);
         break;
       }
+      if (error.status === 401 || error.status === 403) break;
       if (error.status === 429) console.warn(`Cloud model ${model} was rate limited; trying the next configured model.`);
       else console.warn(`Cloud model ${model} failed; trying the next configured model.`);
     }
@@ -246,14 +271,14 @@ function normalizeTools(tools) {
   return normalized;
 }
 
-async function requestCloudAgent(messages, tools, models = cloudModels) {
-  if (!cloudApiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
+async function requestCloudAgent(messages, tools, models = cloudModels, apiKey = cloudApiKey) {
+  if (!apiKey || models.length === 0) throw new Error("Add GROQ_API_KEY (or CLOUD_API_KEY for an alternate provider) to server/.env to enable cloud AI.");
   let lastError;
   for (const model of models) {
     try {
       const response = await fetch(cloudApiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${cloudApiKey}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
           messages: [
@@ -282,6 +307,7 @@ async function requestCloudAgent(messages, tools, models = cloudModels) {
         console.warn(`Cloud agent model ${model} could not reach its provider; skipping the remaining cloud models.`);
         break;
       }
+      if (error.status === 401 || error.status === 403) break;
       if (error.status === 429) console.warn(`Cloud agent model ${model} was rate limited; trying the next configured model.`);
       else console.warn(`Cloud agent model ${model} failed; trying the next configured model.`);
     }
@@ -316,6 +342,14 @@ app.post("/api/agent", async (req, res) => {
   }
   const tools = normalizeTools(req.body?.tools);
   if (!tools) return res.status(400).json({ error: "The agent tool schemas are invalid." });
+  let requestApiKey;
+  if (mode === "cloud") {
+    try {
+      requestApiKey = getRequestCloudApiKey(req);
+    } catch (error) {
+      return res.status(error.status || 400).json({ error: error.message });
+    }
+  }
   const selectedModels = mode === "cloud" && typeof model === "string"
     ? (cloudModels.includes(model) ? [model, ...cloudModels.filter((candidate) => candidate !== model)] : null)
     : cloudModels;
@@ -330,15 +364,19 @@ app.post("/api/agent", async (req, res) => {
     }));
     const message = mode === "ollama"
       ? await requestOllamaAgent(normalizedMessages, tools)
-      : await requestCloudAgent(normalizedMessages, tools, selectedModels);
+      : await requestCloudAgent(normalizedMessages, tools, selectedModels, requestApiKey);
     return res.json({ message: { content: typeof message.content === "string" ? message.content : "", tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls : [] } });
   } catch (error) {
     console.error(`${mode} agent request failed (${error?.name || "request error"}).`);
-    const missingCloudSettings = mode === "cloud" && (!cloudApiKey || cloudModels.length === 0);
-    return res.status(missingCloudSettings ? 503 : 502).json({
+    const missingCloudSettings = mode === "cloud" && (!requestApiKey || cloudModels.length === 0);
+    const rejectedUserKey = mode === "cloud" && (error?.status === 401 || error?.status === 403);
+    const status = missingCloudSettings ? 503 : rejectedUserKey ? error.status : 502;
+    return res.status(status).json({
       error: mode === "ollama"
         ? "Could not reach Ollama or its model does not support tool calling."
-        : "Cloud AI could not complete an agent step with the configured models.",
+        : rejectedUserKey
+          ? "Groq rejected this API key. Check that the key is valid and active."
+          : "Cloud AI could not complete an agent step with the configured models.",
     });
   }
 });
@@ -419,6 +457,15 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "Each message needs a valid role and non-empty content up to 4,000 characters." });
   }
 
+  let requestApiKey;
+  if (mode === "cloud") {
+    try {
+      requestApiKey = getRequestCloudApiKey(req);
+    } catch (error) {
+      return res.status(error.status || 400).json({ error: error.message });
+    }
+  }
+
   const selectedModels = mode === "cloud" && typeof model === "string"
     ? (cloudModels.includes(model) ? [model, ...cloudModels.filter((candidate) => candidate !== model)] : null)
     : cloudModels;
@@ -428,15 +475,19 @@ app.post("/api/chat", async (req, res) => {
     const normalizedMessages = messages.map(({ role, content }) => ({ role, content: content.trim() }));
     const result = mode === "ollama"
       ? await requestOllama(normalizedMessages)
-      : await requestCloud(normalizedMessages, selectedModels);
+      : await requestCloud(normalizedMessages, selectedModels, requestApiKey);
     if (!result.reply) return res.status(502).json({ error: "The AI returned an empty response. Please try again." });
     return res.json(result);
   } catch (error) {
     console.error(`${mode} chat request failed (${error?.name || "request error"}).`);
+    const missingCloudSettings = mode === "cloud" && (!requestApiKey || cloudModels.length === 0);
+    const rejectedUserKey = mode === "cloud" && (error?.status === 401 || error?.status === 403);
     const message = mode === "ollama"
       ? "Could not reach your Ollama server. Check that it is running and that OLLAMA_BASE_URL is correct."
-      : "Cloud AI could not respond using the configured model fallback chain. Check the API key and model access.";
-    return res.status(mode === "cloud" && (!cloudApiKey || cloudModels.length === 0) ? 503 : 502).json({ error: message });
+      : rejectedUserKey
+        ? "Groq rejected this API key. Check that the key is valid and active."
+        : "Cloud AI could not respond using the configured model fallback chain.";
+    return res.status(missingCloudSettings ? 503 : rejectedUserKey ? error.status : 502).json({ error: message });
   }
 });
 

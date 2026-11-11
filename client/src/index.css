@@ -69,6 +69,19 @@ textarea {
   background-size: cover;
 }
 
+.landing-page {
+  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+  scrollbar-color: rgba(148, 163, 184, 0.24) transparent;
+  scrollbar-width: thin;
+}
+
+.landing-grain {
+  background-image: radial-gradient(rgba(173, 190, 255, 0.22) 0.55px, transparent 0.55px);
+  background-size: 5px 5px;
+  mask-image: linear-gradient(120deg, black, transparent 68%);
+}
+
 .avatar-model-frame {
   top: max(3.3rem, calc(env(safe-area-inset-top) + 1rem));
   bottom: max(4.1rem, calc(env(safe-area-inset-bottom) + 3rem));

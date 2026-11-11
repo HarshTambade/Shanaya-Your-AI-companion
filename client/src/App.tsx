@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Aperture } from "lucide-react";
+import { Aperture, House } from "lucide-react";
 import AvatarScene, { type AvatarMotion } from "./components/AvatarScene";
 import ChatUI from "./components/ChatUI";
+import LandingPage from "./components/LandingPage";
 import PlatformDownloads from "./components/PlatformDownloads";
 import type { Emotion } from "./types";
 
@@ -15,8 +16,14 @@ const emotionColors: Record<Emotion, string> = {
 };
 
 export default function App() {
+  const [screen, setScreen] = useState<"landing" | "companion">("landing");
+  const [groqApiKey, setGroqApiKey] = useState("");
   const [emotion, setEmotion] = useState<Emotion>("neutral");
   const [motion, setMotion] = useState<AvatarMotion>("loading");
+
+  if (screen === "landing") {
+    return <LandingPage onStart={(apiKey) => { setGroqApiKey(apiKey); setScreen("companion"); }} />;
+  }
 
   return (
     <main className="relative h-[100dvh] min-h-0 w-full overflow-hidden bg-[#080b14] text-slate-100">
@@ -69,7 +76,13 @@ export default function App() {
         <section className="chat-pane flex min-h-0 flex-col gap-2.5 p-3 sm:gap-4 sm:p-5 lg:gap-5 lg:p-7" aria-label="Chat and settings">
           <header className="flex shrink-0 items-center justify-between gap-3 px-1">
             <div className="min-w-0">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/70">Companion interface</p>
+              <button
+                type="button"
+                onClick={() => { setGroqApiKey(""); setEmotion("neutral"); setScreen("landing"); }}
+                className="mb-1 inline-flex items-center gap-1.5 text-[9px] font-medium text-slate-500 transition hover:text-cyan-100"
+              >
+                <House size={11} /> Home
+              </button>
               <h1 className="mt-0.5 font-['Manrope'] text-base font-semibold text-white sm:text-lg">Conversation</h1>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -80,7 +93,7 @@ export default function App() {
             </div>
           </header>
           <div className="min-h-0 flex-1">
-            <ChatUI panel onEmotionChange={setEmotion} />
+            <ChatUI panel groqApiKey={groqApiKey} onEmotionChange={setEmotion} />
           </div>
         </section>
       </div>

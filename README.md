@@ -60,11 +60,11 @@ These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---You
 ## Highlights
 
 - **A living interface:** a Three.js avatar reacts to the emotion returned by the selected model.
-- **Bring your own inference:** use a hosted OpenAI-compatible provider, Ollama, WebLLM, or a downloaded GGUF model on iOS and Android.
+- **Bring your own inference:** use your session-only Groq key, a server-configured OpenAI-compatible provider, Ollama, WebLLM, or a downloaded GGUF model on iOS and Android.
 - **Offline-first behavior:** disconnected web and desktop sessions use WebLLM; native mobile sessions use the downloaded llama.cpp model.
 - **Multilingual voice:** speech recognition and speech playback support English (`en-US`), Hindi (`hi-IN`), and Marathi (`mr-IN`), subject to platform availability.
 - **One codebase, multiple surfaces:** run as a Vite web app/PWA, a Capacitor iOS or Android app, or a Capacitor Electron desktop app.
-- **Secret-safe server boundary:** provider credentials stay in the Express server and are never exposed as `VITE_*` variables.
+- **Secret-safe key handling:** server credentials stay on the server and never enter `VITE_*`; a visitor's Groq key stays in page memory and is sent only in a request header to the app API.
 - **Accessible responsive UI:** mobile safe areas, keyboard-friendly controls, status messages, and responsive layouts are built into the client.
 
 ## Product principles
@@ -73,7 +73,7 @@ Shanaya is designed around a few principles that should guide new features:
 
 1. **User choice:** users should be able to choose hosted, local, browser, or native inference where their platform supports it.
 2. **Graceful degradation:** unavailable providers, missing hardware, denied permissions, and offline sessions should produce a useful explanation rather than a silent failure.
-3. **Secret separation:** public client configuration belongs in `VITE_*`; provider keys and token-issuer credentials belong only on the server.
+3. **Secret separation:** public client configuration belongs in `VITE_*`; server keys and token-issuer credentials stay server-side. A visitor may opt to provide a Groq key for the current page session; the client does not persist it, and the API forwards it only to Groq's official HTTPS endpoint.
 4. **Small, inspectable boundaries:** provider adapters, speech integrations, and native services should remain isolated from the presentation layer.
 5. **Explicit limitations:** model quality, speech availability, data handling, and third-party terms should be documented instead of implied.
 6. **Respectful companion behavior:** Shanaya is software, not a medical, legal, financial, or emergency service. Product copy and integrations should not encourage unsafe reliance.
@@ -141,7 +141,7 @@ The `client` service is public at `/`. The server handles `/api/*`; its `/mcp` r
 1. The user submits a message from the chat surface.
 2. The client checks connectivity and resolves the effective inference mode.
 3. Local modes generate in the browser or on the device.
-4. Cloud and Ollama modes send a validated request to `POST /api/chat`.
+4. Cloud and Ollama modes send a validated request to `POST /api/agent`. When a visitor provides a Groq key, the client sends it in the `X-Groq-API-Key` request header; it is not included in the message body.
 5. The selected model is instructed to return:
 
    ```json
@@ -183,7 +183,7 @@ Capabilities vary by runtime and by the device/browser configuration:
 
 - The client keeps the active conversation in React state for the current page/session.
 - This repository does not add a database or server-side conversation history.
-- Cloud mode sends the selected messages to the configured cloud provider through the API server.
+- Cloud mode sends the selected messages to Groq through the API server. The browser's optional BYOK is sent as `X-Groq-API-Key` per request, held only in memory, and forwarded only to `api.groq.com` over HTTPS; it is not persisted or included in application logs.
 - MobileClaw mode sends online messages directly to Anthropic using the key stored by the native plugin.
 - Ollama mode sends the selected messages to the configured Ollama instance through the API server.
 - WebLLM and native llama.cpp modes generate locally, subject to browser/device runtime behavior.
@@ -244,7 +244,7 @@ Provider behavior is outside this repository's control. Before production use, r
 
 ### Primary client and server
 
-The root app uses the React/Vite client in `client/` and the Express API in `server/`. Cloud requests go to Express, which keeps provider keys on the server. Groq is the default cloud provider; other inference modes remain user-selectable.
+The root app uses the React/Vite client in `client/` and the Express API in `server/`. The landing page asks visitors for their own Groq key before entering the companion. It remains in client memory for that page session and is forwarded in a request header; the Express API sends it only to Groq's official HTTPS API and does not persist or log it. Server-configured provider credentials remain available for non-browser clients and deployments that use them.
 
 ### 1. Install dependencies
 
@@ -260,7 +260,7 @@ npm install --prefix server
 cp server/.env.example server/.env
 ```
 
-Groq is the default cloud provider. Add your server-side Groq API key to `server/.env`:
+Groq is the default cloud provider. To use cloud AI for server-side clients such as MCP, add a server-side Groq API key to `server/.env`. Browser visitors can instead supply their own key on the landing page:
 
 ```dotenv
 PORT=3001
@@ -272,7 +272,7 @@ GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b,llama-3.1-8b-instant
 CLOUD_REQUEST_TIMEOUT_MS=10000
 ```
 
-The server defaults to Groq's OpenAI-compatible endpoint and tries GPT-OSS 120B, GPT-OSS 20B, then Llama 3.1 8B Instant. A failed network connection skips the remaining cloud models. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
+The server defaults to Groq's OpenAI-compatible endpoint and tries GPT-OSS 120B, GPT-OSS 20B, then Llama 3.1 8B Instant. A failed network connection skips the remaining cloud models. You can choose another configured cloud model or inference mode in the app's settings. A visitor-provided Groq key is held only in page memory, sent to the app API over HTTPS in `X-Groq-API-Key`, and forwarded only when the API URL's hostname is exactly `api.groq.com`; it is not stored or logged by the application. Never put the server-side key in `client/.env` or expose it through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
 
 The API binds to `127.0.0.1` by default. For a phone on your trusted development LAN, set `HOST=0.0.0.0` and use the computer's LAN address in `client/.env`; avoid exposing that development server to public networks.
 
@@ -357,7 +357,7 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `MCP_ENABLED` | No | `false` | Set to `true` to mount the remote `/mcp` Streamable HTTP endpoint. |
 | `MCP_API_TOKEN` | Required when remote MCP is enabled | — | Random bearer token of at least 32 characters. Never place it in client code. |
 | `SHANAYA_API_URL` | No | `http://127.0.0.1:3001` | Shanaya API origin used by the MCP stdio server and tools. |
-| `GROQ_API_KEY` | For default cloud mode | — | Server-side Groq key. `CLOUD_API_KEY` remains available for compatible providers. |
+| `GROQ_API_KEY` | For server-side cloud clients | — | Server-side Groq key. Browser visitors can provide a session-only key in the landing page. `CLOUD_API_KEY` remains available for compatible providers. |
 | `GROQ_API_URL` | No | Groq chat completions endpoint | Optional Groq-compatible endpoint override. `CLOUD_API_URL` can select another compatible provider. |
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Primary cloud model. |
 | `GROQ_MODEL_FALLBACKS` | No | `openai/gpt-oss-20b,llama-3.1-8b-instant` | Comma-separated fallback models, also shown in the app's model selector. |
@@ -378,7 +378,7 @@ All environment templates are committed as examples. Actual secrets are ignored 
 
 ### Cloud AI
 
-Cloud mode defaults to Groq GPT-OSS 120B through the Express API, with GPT-OSS 20B as a fallback. The inference settings let users choose among the server's configured cloud models or switch to another runtime. Provider keys stay on the server. A selected cloud model is attempted first, followed by the remaining configured models.
+Cloud mode defaults to Groq GPT-OSS 120B through the Express API, with GPT-OSS 20B as a fallback. Visitors enter their Groq key on the landing page; the client keeps it in memory and sends it only with cloud agent requests. The API forwards visitor keys only to Groq's official HTTPS endpoint and does not persist or log them. Other server-side provider keys stay on the server. A selected cloud model is attempted first, followed by the remaining configured models.
 
 ### WebLLM Local
 
@@ -648,7 +648,7 @@ To deploy:
 1. Import the repository into Vercel.
 2. Use the root directory containing [`vercel.json`](./vercel.json).
 3. Configure client variables such as `VITE_PINECALL_AGENT_ID` and `VITE_API_BASE_URL` only when an external API origin is required. With the configured rewrites, leave `VITE_API_BASE_URL` empty so the browser uses the same-domain `/api` route.
-4. Configure server secrets such as `CLOUD_API_URL`, `CLOUD_API_KEY`, `OLLAMA_BASE_URL`, `PINECALL_TOKEN_URL`, and optional TTS variables in the server service environment.
+4. Configure server secrets such as `CLOUD_API_URL`, `CLOUD_API_KEY`, `OLLAMA_BASE_URL`, `PINECALL_TOKEN_URL`, and optional TTS variables in the server service environment. A server-side `GROQ_API_KEY` is optional for web visitors, who supply their own key in the landing page; retain it only for server-side clients such as MCP.
 5. To enable remote MCP, also set `MCP_ENABLED=true`, `MCP_API_TOKEN` to a generated secret, `SHANAYA_API_URL` to the public API origin, and add the MCP host web origin to `CLIENT_ORIGIN`.
 6. Deploy and verify:
 
@@ -673,6 +673,7 @@ To deploy:
    NODE_ENV=production
    PORT=3001
    CLIENT_ORIGIN=https://app.example.com
+   # Optional for server-side clients such as MCP; web visitors bring their own key.
    GROQ_API_KEY=replace_me
    GROQ_MODEL=openai/gpt-oss-120b
    GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b,llama-3.1-8b-instant

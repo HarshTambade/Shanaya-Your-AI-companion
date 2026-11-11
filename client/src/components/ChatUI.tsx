@@ -83,11 +83,12 @@ function formatDuration(seconds: number) {
 type ChatUIProps = {
   onEmotionChange: (emotion: Emotion) => void;
   panel?: boolean;
+  groqApiKey: string;
 };
 
 type ApiStatus = "checking" | "connected" | "offline" | "misconfigured";
 
-export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) {
+export default function ChatUI({ onEmotionChange, panel = false, groqApiKey }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<InferenceMode>("cloud");
@@ -317,6 +318,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
         result = await runAgentTurn({
           mode: effectiveMode,
           model: cloudModel || undefined,
+          groqApiKey,
           messages: nextMessages,
           generateLocal: async (prompt, routeMode) => {
             if (routeMode === "webllm") {
