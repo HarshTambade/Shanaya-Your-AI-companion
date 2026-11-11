@@ -5,10 +5,20 @@ import { apiUrl } from "./api";
 import { getNetworkStatus } from "./AIService";
 
 const voiceNames: Record<SpeechLanguage, string[]> = {
-  "en-US": ["charvi", "samantha", "aria", "female", "woman"],
-  "hi-IN": ["charvi", "lekha", "female", "woman"],
-  "mr-IN": ["charvi", "female", "woman"],
+  "en-US": ["charvi", "zoe", "ava", "aria", "allison", "samantha", "victoria", "serena", "female", "woman"],
+  "hi-IN": ["charvi", "lekha", "aditi", "neelam", "swara", "female", "woman"],
+  "mr-IN": ["charvi", "aditi", "swara", "lekha", "female", "woman"],
 };
+
+const softVoiceStyle = { pitch: 1.18, rate: 0.84, volume: 0.86 };
+
+function preferredVoice<T extends { name: string }>(voices: T[], language: SpeechLanguage) {
+  for (const term of voiceNames[language]) {
+    const match = voices.find((voice) => voice.name.toLowerCase().includes(term));
+    if (match) return match;
+  }
+  return undefined;
+}
 
 function speakInBrowser(text: string, language: SpeechLanguage) {
   const synthesis = typeof window !== "undefined" ? window.speechSynthesis : undefined;
@@ -21,14 +31,17 @@ function speakInBrowser(text: string, language: SpeechLanguage) {
     const prefix = language.split("-")[0].toLowerCase();
     const voices = synthesis.getVoices();
     const matchingVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith(prefix));
-    const preferredTerms = voiceNames[language];
-    const voice = matchingVoices.find((candidate) => preferredTerms.some((term) => candidate.name.toLowerCase().includes(term)))
+    const softFemaleVoices = matchingVoices.filter((voice) => !/\b(male|david|fred|daniel|james|tom|alex)\b/i.test(voice.name));
+    const voice = preferredVoice(softFemaleVoices, language)
+      ?? softFemaleVoices.find((candidate) => /\b(female|woman)\b/i.test(candidate.name))
+      ?? softFemaleVoices[0]
+      ?? preferredVoice(matchingVoices, language)
       ?? matchingVoices[0];
     if (voice) utterance.voice = voice;
     utterance.lang = language;
-    utterance.pitch = 1.05;
-    utterance.rate = 0.9;
-    utterance.volume = 0.95;
+    utterance.pitch = softVoiceStyle.pitch;
+    utterance.rate = softVoiceStyle.rate;
+    utterance.volume = softVoiceStyle.volume;
     utterance.onend = () => resolve(voice?.name || `${language} system voice`);
     utterance.onerror = (event) => reject(new Error(event.error === "not-allowed"
       ? "Allow speech output in your browser and try again."
@@ -81,9 +94,7 @@ export class SpeechService {
       );
 
       // The OS speech plugin can select Charvi only if that voice is installed as a system voice.
-      const preferredTerms = voiceNames[language];
-      const voice = offlineVoices.find((candidate) => candidate.name.toLowerCase().includes("charvi"))
-        || offlineVoices.find((candidate) => preferredTerms.some((term) => candidate.name.toLowerCase().includes(term)))
+      const voice = preferredVoice(offlineVoices, language)
         || offlineVoices.find((candidate) => candidate.gender === "female")
         || offlineVoices[0];
 
@@ -95,9 +106,9 @@ export class SpeechService {
         text,
         language,
         voiceId: voice.id,
-        pitch: 1.05,
-        rate: 0.9,
-        volume: 0.95,
+        pitch: softVoiceStyle.pitch,
+        rate: softVoiceStyle.rate,
+        volume: softVoiceStyle.volume,
         queueStrategy: "Flush",
       });
       return voice.name;
@@ -108,6 +119,11 @@ export class SpeechService {
   }
 
   static async cancel() {
-    await SpeechSynthesis.cancel();
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+    try {
+      await SpeechSynthesis.cancel();
+    } catch {
+      // Browser speech is already cancelled above; the native plugin may not exist on web.
+    }
   }
 }

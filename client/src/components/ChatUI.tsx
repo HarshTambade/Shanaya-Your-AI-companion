@@ -1,9 +1,8 @@
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useBrowserLLM } from "use-browser-llm";
-import { useCallClient } from "@pinecall/ionic/react";
 import {
-  ArrowUp, Bot, Cpu, Globe2, HardDrive, KeyRound, Laptop, LockKeyhole, Mic, Phone, PhoneOff,
+  ArrowUp, Bot, Cpu, Globe2, HardDrive, KeyRound, Laptop, LockKeyhole, Mic, MicOff, Phone, PhoneOff,
   RotateCcw, Settings2, Smartphone, Speaker, VolumeX, X,
 } from "lucide-react";
 import type { ChatMessage, Emotion, InferenceMode, SpeechLanguage } from "../types";
@@ -15,11 +14,9 @@ import {
   resolveInferenceMode,
   type OfflineModelStatus,
 } from "../services/AIService";
-import { requestCallMicrophonePermission } from "../services/callPermissions";
 import { apiUrl } from "../services/api";
 import { SpeechService } from "../services/SpeechService";
 import { VoiceService } from "../services/VoiceService";
-import { pinecallAgentId, shanayaCallClient } from "../services/callClient";
 import { agentRules, runAgentTurn, type AgentActivity } from "../services/AgentRuntime";
 import { clearMobileAgentConversation, getMobileAgentStatus, runMobileAgentTurn, setMobileAgentApiKey } from "../services/MobileAgent";
 import { hasDesktopBridge, runDesktopAgentTurn } from "../services/DesktopAgent";
@@ -107,6 +104,12 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   });
   const [voiceStatus, setVoiceStatus] = useState("");
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isVirtualCallActive, setIsVirtualCallActive] = useState(false);
+  const [isCallMicEnabled, setIsCallMicEnabled] = useState(false);
+  const [isCallSpeakerOn, setIsCallSpeakerOn] = useState(true);
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  const [callDuration, setCallDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nativeStatus, setNativeStatus] = useState<OfflineModelStatus>("checking");
@@ -118,8 +121,13 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const [modelDownloadProgress, setModelDownloadProgress] = useState(0);
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const callLogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const voiceSessionRef = useRef<(() => Promise<void> | void) | null>(null);
+  const startCallListeningRef = useRef<() => void>(() => undefined);
+  const callActiveRef = useRef(false);
+  const callMicEnabledRef = useRef(false);
+  const callSpeakerRef = useRef(true);
   const isOnline = useConnectivity();
   const platform = Capacitor.getPlatform();
   const isNative = platform === "ios" || platform === "android";
@@ -133,11 +141,6 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       description: `${cloudProvider} model with device tools`,
     }
     : modeDetails[effectiveMode];
-  const call = useCallClient(shanayaCallClient);
-  const isCallConnecting = call.status === "connecting";
-  const isCallConnected = call.status === "connected";
-  const showCallPanel = call.status !== "idle" || call.messages.length > 0;
-
   useEffect(() => {
     let active = true;
     const loadApiStatus = async () => {
@@ -217,8 +220,17 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, isLoading, error, call.messages.length]);
+    const target = isVirtualCallActive ? callLogRef.current : scrollRef.current;
+    target?.scrollTo({ top: target.scrollHeight, behavior: "smooth" });
+  }, [messages, isLoading, error, isVirtualCallActive]);
+
+  useEffect(() => {
+    if (!isVirtualCallActive || callStartedAt === null) return;
+    const updateDuration = () => setCallDuration(Math.floor((Date.now() - callStartedAt) / 1000));
+    updateDuration();
+    const timer = window.setInterval(updateDuration, 1000);
+    return () => window.clearInterval(timer);
+  }, [callStartedAt, isVirtualCallActive]);
 
   const handlePrepareNative = async () => {
     setIsPreparingNative(true);
@@ -257,6 +269,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
     setAgentActivity({ phase: "thinking", message: "Shanaya is thinking…" });
     if (inputRef.current) inputRef.current.style.height = "auto";
 
+    let spokenReply: Promise<void> | null = null;
     try {
       let result: { reply: string; emotion: Emotion };
       const publishActivity = (message: string, acting = false) => {
@@ -294,9 +307,12 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       setMessages((current) => [...current, { role: "assistant", content: result.reply }]);
       onEmotionChange(result.emotion);
       if (speakReply) {
-        void SpeechService.speak(result.reply, speechLanguage)
+        setVoiceStatus("Shanaya is speaking…");
+        setIsSpeaking(true);
+        spokenReply = SpeechService.speak(result.reply, speechLanguage)
           .then((voiceName) => setVoiceStatus(`Speaking with ${voiceName}`))
-          .catch((speechError) => setVoiceStatus(speechError instanceof Error ? speechError.message : "Offline voice unavailable."));
+          .catch((speechError) => setVoiceStatus(speechError instanceof Error ? speechError.message : "Offline voice unavailable."))
+          .finally(() => setIsSpeaking(false));
       }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Something went wrong. Please try again.");
@@ -304,6 +320,15 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       setIsLoading(false);
       setAgentActivity(null);
       inputRef.current?.focus();
+      if (callActiveRef.current && callMicEnabledRef.current) {
+        const resumeListening = () => {
+          if (callActiveRef.current && callMicEnabledRef.current && !isLoading) {
+            startCallListeningRef.current();
+          }
+        };
+        if (spokenReply) void spokenReply.then(() => window.setTimeout(resumeListening, 350));
+        else window.setTimeout(resumeListening, 350);
+      }
     }
   };
 
@@ -322,44 +347,64 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
     }
   };
 
-  const startVoiceCall = async () => {
-    setError("");
-    if (!isOnline) {
-      setError("Voice calls need an internet connection. Offline chat and native speech remain available.");
-      return;
-    }
-    if (!pinecallAgentId) {
-      setError("Configure VITE_PINECALL_AGENT_ID and PINECALL_TOKEN_URL to start calls.");
-      return;
-    }
+  const startVirtualCall = async () => {
+    if (isVirtualCallActive) return;
+    const stop = voiceSessionRef.current;
+    voiceSessionRef.current = null;
     try {
-      if (!await requestCallMicrophonePermission()) {
-        setError("Allow microphone access in device settings to start a voice call.");
-        return;
-      }
-      await call.startCall({
-        agentId: pinecallAgentId,
-        callerName: "You",
-        handle: "Shanaya voice call",
-        tokenUrl: apiUrl("/api/pinecall/token"),
-      });
-    } catch (callError) {
-      setError(callError instanceof Error ? callError.message : "Could not start the voice call.");
+      if (stop) await stop();
+    } catch {
+      // Starting the virtual call should recover from an already-ended mic session.
+    }
+    setIsListening(false);
+    setError("");
+    callActiveRef.current = true;
+    callMicEnabledRef.current = true;
+    setIsVirtualCallActive(true);
+    setIsCallMicEnabled(true);
+    setCallStartedAt(Date.now());
+    setCallDuration(0);
+    callSpeakerRef.current = true;
+    setIsCallSpeakerOn(true);
+    setVoiceStatus("Virtual call connected · your microphone is live");
+    startCallListeningRef.current();
+  };
+
+  const endVirtualCall = async () => {
+    callActiveRef.current = false;
+    callMicEnabledRef.current = false;
+    const stop = voiceSessionRef.current;
+    voiceSessionRef.current = null;
+    try {
+      if (stop) await stop();
+    } catch {
+      // The conversation still ends if the browser has already stopped recognition.
+    }
+    setIsListening(false);
+    setIsCallMicEnabled(false);
+    setIsSpeaking(false);
+    setIsVirtualCallActive(false);
+    setCallStartedAt(null);
+    setCallDuration(0);
+    callSpeakerRef.current = true;
+    setIsCallSpeakerOn(true);
+    void SpeechService.cancel().catch(() => undefined);
+    setVoiceStatus("Virtual call ended");
+  };
+
+  const toggleCallSpeaker = () => {
+    const enabled = !callSpeakerRef.current;
+    callSpeakerRef.current = enabled;
+    setIsCallSpeakerOn(enabled);
+    setVoiceStatus(enabled ? "Call speaker on" : "Call speaker muted");
+    if (!enabled) {
+      setIsSpeaking(false);
+      void SpeechService.cancel().catch(() => undefined);
     }
   };
 
-  const toggleVoiceInput = async () => {
-    if (isListening) {
-      try {
-        await voiceSessionRef.current?.();
-      } finally {
-        voiceSessionRef.current = null;
-        setIsListening(false);
-        setVoiceStatus("Voice input stopped");
-      }
-      return;
-    }
-
+  const startVoiceInputSession = async () => {
+    if (voiceSessionRef.current) return;
     setError("");
     try {
       voiceSessionRef.current = await VoiceService.startSession(speechLanguage, (transcript, isFinal) => {
@@ -369,7 +414,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
           voiceSessionRef.current = null;
           setIsListening(false);
           void stop?.();
-          void submitMessage(undefined, transcript, true);
+          void submitMessage(undefined, transcript, callSpeakerRef.current);
         }
       }, (message) => {
         setError(message);
@@ -377,6 +422,10 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
         voiceSessionRef.current = null;
         setIsListening(false);
         void stop?.();
+        if (callActiveRef.current) {
+          callMicEnabledRef.current = false;
+          setIsCallMicEnabled(false);
+        }
       });
       setIsListening(true);
       setVoiceStatus(`Listening in ${speechLanguage} · speak to send`);
@@ -384,7 +433,43 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       voiceSessionRef.current = null;
       setIsListening(false);
       setError(voiceError instanceof Error ? voiceError.message : "Could not start voice input.");
+      if (callActiveRef.current) {
+        callMicEnabledRef.current = false;
+        setIsCallMicEnabled(false);
+      }
     }
+  };
+
+  startCallListeningRef.current = () => { void startVoiceInputSession(); };
+
+  const toggleVoiceInput = async () => {
+    if (!isListening) {
+      await startVoiceInputSession();
+      return;
+    }
+    try {
+      await voiceSessionRef.current?.();
+    } finally {
+      voiceSessionRef.current = null;
+      setIsListening(false);
+      setVoiceStatus("Voice input stopped");
+    }
+  };
+
+  const toggleCallMicrophone = () => {
+    const enabled = !callMicEnabledRef.current;
+    callMicEnabledRef.current = enabled;
+    setIsCallMicEnabled(enabled);
+    if (enabled) {
+      if (!isLoading && !isSpeaking) startCallListeningRef.current();
+      return;
+    }
+
+    const stop = voiceSessionRef.current;
+    voiceSessionRef.current = null;
+    setIsListening(false);
+    setVoiceStatus("Call microphone muted");
+    void Promise.resolve(stop?.()).catch(() => undefined);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -455,7 +540,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
                     : effectiveMode === "cloud" && apiStatus === "checking"
                       ? "Connecting to the API…"
                       : selectedMode.label}
-              {isCallConnected ? ` · call ${formatDuration(call.duration)}` : ""}
+              {isVirtualCallActive ? ` · virtual call ${formatDuration(callDuration)}` : ""}
             </p>
           </div>
         </div>
@@ -656,25 +741,67 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
         </div>
       </div>
 
-      {showCallPanel && (isCallConnecting || isCallConnected || call.messages.length > 0 || call.error) && (
-        <div className="mx-3 mb-2 rounded-2xl border border-violet-300/15 bg-violet-400/[0.06] px-3 py-2.5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-violet-100">
-              <Phone size={13} />
-              {isCallConnected ? `Connected · ${formatDuration(call.duration)}` : isCallConnecting ? "Connecting to Shanaya…" : "Voice call"}
+      {isVirtualCallActive && (
+        <div className="absolute inset-0 z-50 flex flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_20%,rgba(117,94,255,0.2),transparent_48%),linear-gradient(180deg,#111523_0%,#090c15_72%)] px-4 pb-4 pt-5 sm:px-6 sm:pb-5">
+          <div className="flex shrink-0 items-center justify-between">
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-[0.22em] text-violet-200/75">Shanaya · virtual call</p>
+              <p className="mt-1 text-[10px] text-slate-500">In-app conversation · no phone network</p>
             </div>
-            <div className="flex items-center gap-1.5">
-              {isCallConnected && <button type="button" onClick={() => void call.toggleMute()} aria-label="Toggle microphone" className="rounded-lg border border-white/10 p-2 text-slate-200"><Mic size={14} /></button>}
-              {isCallConnected && <button type="button" onClick={() => void call.toggleSpeaker()} aria-label="Toggle speaker" className="rounded-lg border border-white/10 p-2 text-slate-200"><Speaker size={14} /></button>}
-              {call.status !== "idle" && <button type="button" onClick={() => void call.endCall()} aria-label="End voice call" className="rounded-lg bg-rose-500/20 p-2 text-rose-100"><PhoneOff size={14} /></button>}
-            </div>
+            <span className="rounded-full border border-emerald-300/10 bg-emerald-300/[0.06] px-2.5 py-1 text-[9px] font-medium text-emerald-200/80">CONNECTED</span>
           </div>
-          {call.messages.length > 0 && (
-            <div className="chat-scrollbar mt-2 max-h-20 space-y-1 overflow-y-auto text-[10px] leading-relaxed text-slate-400">
-              {call.messages.slice(-4).map((message) => <p key={message.id}><span className="text-violet-200">{message.role === "bot" ? "Shanaya" : "You"}:</span> {message.text}</p>)}
+
+          <div className="flex shrink-0 flex-col items-center pb-5 pt-6 text-center sm:pt-8">
+            <div className="relative flex h-24 w-24 items-center justify-center rounded-full border border-violet-200/20 bg-violet-300/[0.1] shadow-[0_0_70px_rgba(139,92,246,0.22)] sm:h-28 sm:w-28">
+              <span className="absolute inset-0 animate-ping rounded-full border border-violet-200/15 [animation-duration:3s]" />
+              <span className="absolute inset-2 rounded-full border border-white/[0.06]" />
+              <Bot size={38} strokeWidth={1.35} className="text-violet-100 sm:h-11 sm:w-11" />
             </div>
-          )}
-          {call.error && <p className="mt-1 text-[10px] text-rose-200">{call.error}</p>}
+            <h2 className="mt-4 font-['Manrope'] text-xl font-semibold text-white">Shanaya</h2>
+            <p className="mt-1 text-xs text-slate-400">{formatDuration(callDuration)} · {isListening ? "Listening to you" : isLoading ? agentActivity?.message || "Thinking…" : isSpeaking ? "Speaking to you" : isCallMicEnabled ? "Ready to listen" : "Microphone muted"}</p>
+          </div>
+
+          <div ref={callLogRef} className="chat-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto rounded-2xl border border-white/[0.06] bg-black/15 p-3">
+            {messages.filter((message) => message.role === "user" || message.role === "assistant").slice(1).slice(-6).map((message, index) => (
+              <div key={`${index}-${message.role}`} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                <p className={`max-w-[88%] rounded-2xl px-3 py-2 text-[11px] leading-relaxed ${message.role === "user" ? "rounded-br-md bg-violet-500/80 text-white" : "rounded-bl-md border border-white/[0.06] bg-white/[0.05] text-slate-200"}`}>
+                  {message.content}
+                </p>
+              </div>
+            ))}
+            {messages.filter((message) => message.role === "user" || message.role === "assistant").length <= 1 && (
+              <p className="py-4 text-center text-[11px] text-slate-500">{isCallMicEnabled ? "Your microphone is live. Say hello when you’re ready." : "Unmute the microphone to start talking."} Shanaya will answer out loud.</p>
+            )}
+            {error && <p role="alert" className="rounded-xl border border-rose-300/10 bg-rose-300/[0.05] px-3 py-2 text-[10px] text-rose-100/90">{error}</p>}
+          </div>
+
+          <div className="flex shrink-0 items-center justify-center gap-4 pt-5">
+            <button
+              type="button"
+              onClick={toggleCallMicrophone}
+              aria-label={isCallMicEnabled ? "Mute microphone" : "Unmute microphone"}
+              className={`flex h-14 w-14 items-center justify-center rounded-full border transition ${isCallMicEnabled ? "border-violet-200/30 bg-violet-400/25 text-violet-50 shadow-[0_0_28px_rgba(167,139,250,0.28)]" : "border-white/10 bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]"}`}
+            >
+              {isCallMicEnabled ? <Mic size={21} /> : <MicOff size={21} />}
+            </button>
+            <button
+              type="button"
+              onClick={toggleCallSpeaker}
+              aria-label={isCallSpeakerOn ? "Mute Shanaya's voice" : "Enable Shanaya's voice"}
+              className={`flex h-12 w-12 items-center justify-center rounded-full border transition ${isCallSpeakerOn ? "border-white/10 bg-white/[0.07] text-slate-200 hover:bg-white/[0.12]" : "border-amber-200/20 bg-amber-200/10 text-amber-100"}`}
+            >
+              {isCallSpeakerOn ? <Speaker size={18} /> : <VolumeX size={18} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => void endVirtualCall()}
+              aria-label="End virtual call"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-500 text-white shadow-lg shadow-rose-950/35 transition hover:bg-rose-400"
+            >
+              <PhoneOff size={21} />
+            </button>
+          </div>
+          <p className="mt-3 shrink-0 text-center text-[9px] text-slate-500">{isListening ? "Listening · speak naturally, then pause" : isLoading ? "Shanaya is replying…" : isSpeaking ? "Shanaya is speaking…" : isCallMicEnabled ? "Speak naturally · the microphone stays on between turns" : "Tap the microphone to unmute"}</p>
         </div>
       )}
 
@@ -716,9 +843,9 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
           </button>
           <button
             type="button"
-            onClick={() => void startVoiceCall()}
-            disabled={!isOnline || isCallConnecting || isCallConnected}
-            title="Voice calls use Pinecall and require internet"
+            onClick={() => void startVirtualCall()}
+            disabled={isLoading}
+            title="Start an in-app virtual voice call"
             className="flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.07] px-2.5 py-1.5 text-[10px] font-medium text-emerald-100 transition hover:bg-emerald-300/[0.12] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Phone size={12} /> Call
