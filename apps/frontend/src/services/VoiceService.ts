@@ -9,9 +9,12 @@ export class VoiceService {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "audio/wav" },
         body: JSON.stringify({ text, language, voice: "Charvi" }),
+        // Fall back to an installed system voice if Mithi is offline or slow.
+        signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error("Mithi TTS is unavailable.");
       const audioBlob = await response.blob();
+      if (!audioBlob.size || audioBlob.size > 20 * 1024 * 1024) throw new Error("Mithi returned an invalid audio response.");
       const audioUrl = URL.createObjectURL(audioBlob);
       try {
         const audio = new Audio(audioUrl);

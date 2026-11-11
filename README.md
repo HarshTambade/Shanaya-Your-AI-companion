@@ -268,11 +268,11 @@ HOST=127.0.0.1
 CLIENT_ORIGIN=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost
 GROQ_API_KEY=your_server_side_groq_api_key
 GROQ_MODEL=openai/gpt-oss-120b
-GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
-CLOUD_REQUEST_TIMEOUT_MS=20000
+GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b,llama-3.1-8b-instant
+CLOUD_REQUEST_TIMEOUT_MS=10000
 ```
 
-The server defaults to Groq's OpenAI-compatible endpoint and tries GPT-OSS 120B, then GPT-OSS 20B. A failed network connection skips the remaining cloud models. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server. The older Llama 3.3 70B and Llama 3.1 8B IDs can still be configured for enterprise accounts that retain access.
+The server defaults to Groq's OpenAI-compatible endpoint and tries GPT-OSS 120B, GPT-OSS 20B, then Llama 3.1 8B Instant. A failed network connection skips the remaining cloud models. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
 
 The API binds to `127.0.0.1` by default. For a phone on your trusted development LAN, set `HOST=0.0.0.0` and use the computer's LAN address in `client/.env`; avoid exposing that development server to public networks.
 
@@ -318,7 +318,7 @@ curl http://localhost:3001/api/health
 
 ### Optional Python model-step fallback
 
-The FastAPI service in `backend/` is optional. If enabled, the client first calls Express as usual and contacts Python only when the Express agent request fails due to a network error, missing endpoint, rate limit, timeout, or server error. Python returns one model step; the client remains responsible for tool validation, device actions, and user confirmations.
+The FastAPI service in `backend/` is optional. If enabled, the client first calls Express as usual and contacts Python only when the Express agent request fails due to a network error, missing endpoint, rate limit, timeout, or server error. Python returns one model step; the client remains responsible for tool validation, device actions, and user confirmations. In Python's own `/api/agent` flow, every registered backend tool—including file reads and status checks—waits for an explicit user approval before execution.
 
 ```bash
 python3 -m venv .venv
@@ -360,8 +360,8 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `GROQ_API_KEY` | For default cloud mode | — | Server-side Groq key. `CLOUD_API_KEY` remains available for compatible providers. |
 | `GROQ_API_URL` | No | Groq chat completions endpoint | Optional Groq-compatible endpoint override. `CLOUD_API_URL` can select another compatible provider. |
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Primary cloud model. |
-| `GROQ_MODEL_FALLBACKS` | No | `openai/gpt-oss-20b` | Comma-separated fallback models, also shown in the app's model selector. |
-| `CLOUD_REQUEST_TIMEOUT_MS` | No | `20000` | Per-model cloud request timeout, bounded to 3–120 seconds. |
+| `GROQ_MODEL_FALLBACKS` | No | `openai/gpt-oss-20b,llama-3.1-8b-instant` | Comma-separated fallback models, also shown in the app's model selector. |
+| `CLOUD_REQUEST_TIMEOUT_MS` | No | `10000` | Per-model cloud request timeout, bounded to 3–120 seconds. |
 | `CLOUD_API_URL` | No | Groq endpoint | OpenAI-compatible `/chat/completions` endpoint for an alternate provider. |
 | `CLOUD_API_KEY` | No | — | Server-side key for an alternate provider; never expose it in a `VITE_*` variable. |
 | `CLOUD_MODEL_FALLBACKS` | No | — | Legacy-compatible comma-separated model list for an alternate provider. |
@@ -675,8 +675,8 @@ To deploy:
    CLIENT_ORIGIN=https://app.example.com
    GROQ_API_KEY=replace_me
    GROQ_MODEL=openai/gpt-oss-120b
-   GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
-   CLOUD_REQUEST_TIMEOUT_MS=20000
+   GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b,llama-3.1-8b-instant
+   CLOUD_REQUEST_TIMEOUT_MS=10000
    ```
 
 4. Start the server:

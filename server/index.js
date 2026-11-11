@@ -25,7 +25,7 @@ const corsOrigin = (origin, callback) => {
 const defaultGroqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 const cloudApiUrl = process.env.GROQ_API_URL || process.env.CLOUD_API_URL || defaultGroqApiUrl;
 const isGroqProvider = cloudApiUrl.startsWith("https://api.groq.com/");
-const defaultGroqModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+const defaultGroqModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 const cloudApiKey = isGroqProvider
   ? process.env.GROQ_API_KEY || process.env.CLOUD_API_KEY
   : process.env.CLOUD_API_KEY || process.env.GROQ_API_KEY;
@@ -46,15 +46,19 @@ const configuredFallbacks = (
   .map((model) => model.trim())
   .filter(Boolean);
 const primaryCloudModel = configuredPrimaryModels[0] || configuredFallbacks[0] || (isGroqProvider ? defaultGroqModels[0] : "");
-const fallbackCloudModels = configuredFallbacks.length
-  ? configuredFallbacks
-  : isGroqProvider ? defaultGroqModels.filter((model) => model !== primaryCloudModel) : [];
+const fallbackCloudModels = isGroqProvider
+  ? (configuredFallbacks.length
+    // Keep the requested small Groq model in the chain even when deployment config
+    // supplies a custom fallback list; de-duplication below preserves its order.
+    ? [...configuredFallbacks, "llama-3.1-8b-instant"]
+    : defaultGroqModels.filter((model) => model !== primaryCloudModel))
+  : configuredFallbacks;
 const cloudModels = [...new Set([
   primaryCloudModel,
   ...configuredPrimaryModels.slice(1),
   ...fallbackCloudModels,
 ].filter(Boolean))];
-const cloudRequestTimeout = Math.max(3_000, Math.min(120_000, Number(process.env.CLOUD_REQUEST_TIMEOUT_MS) || 20_000));
+const cloudRequestTimeout = Math.max(3_000, Math.min(120_000, Number(process.env.CLOUD_REQUEST_TIMEOUT_MS) || 10_000));
 const cloudProvider = isGroqProvider ? "Groq" : "Custom";
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "gurubot/self-after-dark:latest";
@@ -112,7 +116,7 @@ app.get("/api/pinecall/token", async (_req, res) => {
 });
 
 function parseJsonObject(content) {
-  const candidate = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const candidate = content.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, "");
   for (let start = 0; start < candidate.length; start += 1) {
     if (candidate[start] !== "{") continue;
     let depth = 0;
@@ -146,7 +150,7 @@ function parseAssistantOutput(content) {
   const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : "";
   const emotion = allowedEmotions.has(parsed?.emotion) ? parsed.emotion : "neutral";
   if (reply) return { reply, emotion };
-  return { reply: content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""), emotion: "neutral" };
+  return { reply: content.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, ""), emotion: "neutral" };
 }
 
 function isNetworkFailure(error) {

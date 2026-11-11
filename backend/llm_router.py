@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,15 +15,17 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 logger = logging.getLogger("shanaya.llm")
-ALLOWED_EMOTIONS = {"happy", "sad", "cute", "neutral"}
+ALLOWED_EMOTIONS = {"happy", "sad", "angry", "neutral", "surprised", "thinking"}
 DEFAULT_GROQ_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
 ]
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-NETWORK_TIMEOUT = httpx.Timeout(90.0, connect=3.0, read=90.0, write=10.0, pool=5.0)
+# Keep failed cloud attempts short so an offline device can reach local inference.
+NETWORK_TIMEOUT = httpx.Timeout(15.0, connect=2.5, read=15.0, write=5.0, pool=3.0)
 
 
 def _csv(name: str, default: str = "") -> list[str]:
@@ -65,7 +68,12 @@ class LLMRouter:
         candidates: list[Candidate] = []
 
         if groq_key:
-            candidates.extend(Candidate(1, "Groq", model, groq_key, GROQ_BASE_URL) for model in _csv("GROQ_MODELS", ",".join(DEFAULT_GROQ_MODELS)))
+            groq_models = _csv("GROQ_MODELS", ",".join(DEFAULT_GROQ_MODELS))
+            # Preserve the inexpensive Groq recovery model even when an operator
+            # customizes the primary model list.
+            if "llama-3.1-8b-instant" not in groq_models:
+                groq_models.append("llama-3.1-8b-instant")
+            candidates.extend(Candidate(1, "Groq", model, groq_key, GROQ_BASE_URL) for model in groq_models)
 
         if openai_key:
             candidates.extend(Candidate(2, "OpenAI", model, openai_key, OPENAI_BASE_URL) for model in _csv("OPENAI_MODELS", "gpt-4o"))
@@ -132,7 +140,10 @@ class LLMRouter:
             except Exception as exc:  # Provider errors intentionally trigger the next candidate.
                 error_name = type(exc).__name__
                 errors.append(f"{candidate.provider}/{candidate.model}: {error_name}")
-                logger.warning("Model request failed for %s/%s (%s)", candidate.provider, candidate.model, error_name)
+                if getattr(exc, "status_code", None) == 429:
+                    logger.warning("Model request was rate limited for %s/%s; trying the next route", candidate.provider, candidate.model)
+                else:
+                    logger.warning("Model request failed for %s/%s (%s)", candidate.provider, candidate.model, error_name)
                 if candidate.tier < 3 and self._is_transport_failure(exc):
                     cloud_unreachable = True
         details = "; ".join(errors) if errors else "no API keys or local model are configured"
@@ -277,10 +288,7 @@ class LLMRouter:
     @staticmethod
     def _structured_json(content: str) -> str:
         candidate_text = content.strip().lstrip("\ufeff")
-        if candidate_text.startswith("```"):
-            candidate_text = candidate_text.split("\n", 1)[-1]
-            if candidate_text.endswith("```"):
-                candidate_text = candidate_text[:-3].strip()
+        candidate_text = re.sub(r"^\s*```(?:[a-z0-9_-]+)?\s*|\s*```\s*$", "", candidate_text, flags=re.IGNORECASE).strip()
         decoder = json.JSONDecoder()
         parsed: Any = None
         for start, character in enumerate(candidate_text):
@@ -299,7 +307,8 @@ class LLMRouter:
         emotion = parsed.get("emotion") if isinstance(parsed, dict) else None
         if not isinstance(reply, str) or not reply.strip():
             reply = candidate_text or "I couldn't form a response. Please try again."
-        if emotion not in ALLOWED_EMOTIONS:
+        # Validate the type before set membership; malformed model JSON may use an array/object here.
+        if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
             emotion = "neutral"
         return json.dumps({"reply": reply.strip(), "emotion": emotion}, ensure_ascii=False)
 

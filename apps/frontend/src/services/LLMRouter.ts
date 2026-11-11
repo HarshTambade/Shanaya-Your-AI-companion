@@ -31,7 +31,7 @@ const allowedEmotions = new Set<Emotion>(["happy", "sad", "cute", "neutral"]);
 
 function parseStructuredReply(content: unknown): { reply: string; emotion: Emotion } {
   if (typeof content !== "string") throw new Error("The model returned an empty response.");
-  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const trimmed = content.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, "");
   let value: unknown = trimmed;
   for (let start = 0; start < trimmed.length; start += 1) {
     if (trimmed[start] !== "{") continue;
@@ -82,7 +82,7 @@ async function readJson(response: Response) {
 }
 
 export async function getModelCatalog(): Promise<ModelCatalog> {
-  const response = await fetch(endpoint("/api/models"), { headers: { Accept: "application/json" } });
+  const response = await fetch(endpoint("/api/models"), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5_000) });
   return readJson(response) as Promise<ModelCatalog>;
 }
 
@@ -98,6 +98,8 @@ export async function routeAgent(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, model: preferredModel }),
+      // Bound network waits so the local model can take over when the API is unreachable.
+      signal: AbortSignal.timeout(15_000),
     });
     const result = await readJson(response);
     if (result.status === "approval_required" && Array.isArray(result.approvals)) {
@@ -124,6 +126,7 @@ export async function resolveApproval(token: string, approved: boolean): Promise
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, approved }),
+    signal: AbortSignal.timeout(15_000),
   });
   return readJson(response);
 }

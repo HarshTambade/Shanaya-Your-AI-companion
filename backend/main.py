@@ -34,16 +34,16 @@ SYSTEM_PROMPT = " ".join([
     "Be warm, concise, and useful. Keep private information private and only use it for the user's request.",
     "Use available tools when needed. Call one tool at a time.",
     "Take initiative within the user's stated request and complete bounded multi-step tasks; ask follow-up questions only when an important detail is missing.",
-    "The backend will pause destructive tools for explicit user confirmation; never claim an action succeeded before its tool result confirms it.",
-    'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|cute|neutral"}.',
+    "The backend pauses every tool call for explicit user confirmation; never claim an action succeeded before its tool result confirms it.",
+    'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
 ])
 CLIENT_FALLBACK_SYSTEM_PROMPT = " ".join([
     "You are Shanaya, a cute, calm, intelligent personal companion.",
     "Be candid and nonjudgmental, and support creative role-play and frank discussion without unnecessary moralizing.",
     "Be warm, concise, and useful. Protect the user's privacy.",
-    "Use the provided function tools when needed; request one tool at a time. File reads are limited to the user's task, and the client confirms every write or deletion. Never claim a tool succeeded before its result arrives.",
+    "Use the provided function tools when needed; request one tool at a time. Sensitive device actions use the client's confirmation flow. Never claim a tool succeeded before its result arrives.",
     "Take initiative within the user's stated task and ask follow-up questions only when an important detail is missing.",
-    'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|neutral"}.',
+    'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
 ])
 MAX_AGENT_ROUNDS = 8
 MAX_TOOL_OUTPUT_CHARS = 24_000
@@ -70,7 +70,8 @@ class ToolSpec(BaseModel):
     name: str
     description: str
     parameters: dict[str, Any]
-    destructive: bool = False
+    # Backend tool execution always waits for a user decision, including reads.
+    requires_approval: bool = True
 
 
 @dataclass
@@ -156,6 +157,8 @@ def _workspace_path(raw_path: str) -> Path:
 
 
 def _read_file(path: str) -> dict[str, Any]:
+    # Keep the capability check at the side-effect boundary, not only at the agent dispatcher.
+    _require_tool_authority("read_file", {"path": path})
     target = _workspace_path(path)
     if not target.is_file():
         raise FileNotFoundError("The requested file does not exist in the workspace.")
@@ -165,6 +168,7 @@ def _read_file(path: str) -> dict[str, Any]:
 
 
 def _write_file(path: str, content: str) -> dict[str, Any]:
+    _require_tool_authority("write_file", {"path": path, "content": content})
     target = _workspace_path(path)
     if len(content.encode("utf-8")) > 1_000_000:
         raise ValueError("The write is larger than the 1 MB limit.")
@@ -174,6 +178,7 @@ def _write_file(path: str, content: str) -> dict[str, Any]:
 
 
 def _system_status() -> dict[str, Any]:
+    _require_tool_authority("system_status", {})
     disk = shutil.disk_usage(WORKSPACE)
     return {
         "platform": platform.platform(),
@@ -186,6 +191,7 @@ def _system_status() -> dict[str, Any]:
 
 
 async def _execute_shell(command: str) -> dict[str, Any]:
+    _require_tool_authority("execute_shell", {"command": command})
     if not command.strip() or len(command) > 4000:
         raise ValueError("Provide a shell command up to 4,000 characters.")
     env_names = {"PATH", "HOME", "USERPROFILE", "TMP", "TEMP", "SYSTEMROOT", "COMSPEC", "PATHEXT"}
@@ -212,39 +218,41 @@ async def _execute_shell(command: str) -> dict[str, Any]:
 
 tools.register(ToolSpec(
     name="read_file",
-    description="Read a UTF-8 text file inside the configured workspace. Never use this to search outside the workspace.",
+    description="After explicit confirmation, read a UTF-8 text file inside the configured workspace. Never use this to search outside the workspace; contents are sent to the selected model provider.",
     parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": False},
 ), _read_file)
 tools.register(ToolSpec(
     name="system_status",
-    description="Return basic OS, CPU, Python, workspace, and free disk status.",
+    description="After explicit confirmation, return basic OS, CPU, Python, workspace, and free disk status.",
     parameters={"type": "object", "properties": {}, "additionalProperties": False},
 ), _system_status)
 tools.register(ToolSpec(
     name="write_file",
     description="Write a UTF-8 text file inside the configured workspace. This changes files and always requires user approval.",
     parameters={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": False},
-    destructive=True,
+    requires_approval=True,
 ), _write_file)
 tools.register(ToolSpec(
     name="execute_shell",
     description="Run a shell command in the configured workspace with a 30 second timeout and a restricted environment. This can change the system and always requires user approval.",
     parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": False},
-    destructive=True,
+    requires_approval=True,
 ), _execute_shell)
 
-# The agent uses the official MCP client/server protocol in-process. Destructive
-# tools are only called after the REST approval flow grants a one-use token.
-mcp_server = MCPServer("Shanaya Device Tools", instructions="Local workspace and system tools. Destructive actions are approval-gated by the Shanaya host.")
+# The agent uses the official MCP client/server protocol in-process. Each tool
+# call is dispatched only after the REST approval flow grants a one-use token.
+mcp_server = MCPServer("Shanaya Device Tools", instructions="Local workspace and system tools. The Shanaya host requires explicit approval before every tool executes.")
 
 
-@mcp_server.tool(name="read_file", description="Read a UTF-8 text file inside the configured workspace.")
+@mcp_server.tool(name="read_file", description="After explicit user approval, read a UTF-8 text file inside the configured workspace; its contents are sent to the selected model provider.")
 def mcp_read_file(path: str) -> dict[str, Any]:
+    _require_tool_authority("read_file", {"path": path})
     return _read_file(path)
 
 
-@mcp_server.tool(name="system_status", description="Return basic OS, CPU, Python, workspace, and free disk status.")
+@mcp_server.tool(name="system_status", description="After explicit user approval, return basic OS, CPU, Python, workspace, and free disk status.")
 def mcp_system_status() -> dict[str, Any]:
+    _require_tool_authority("system_status", {})
     return _system_status()
 
 
@@ -297,14 +305,14 @@ async def _execute_registered_tool(
     if tool is None:
         raise ValueError(f"Unknown tool: {name}")
     authorized = None
-    if tool.spec.destructive:
-        if (
-            approval is None
-            or approval.tool_name != name
-            or _canonical_arguments(approval.arguments) != _canonical_arguments(arguments)
-            or time.time() - approval.created_at > APPROVAL_TTL_SECONDS
-        ):
-            raise PermissionError(f"The {name} tool requires a matching, unexpired user approval.")
+    if tool.spec.requires_approval and (
+        approval is None
+        or approval.tool_name != name
+        or _canonical_arguments(approval.arguments) != _canonical_arguments(arguments)
+        or time.time() - approval.created_at > APPROVAL_TTL_SECONDS
+    ):
+        raise PermissionError(f"The {name} tool requires a matching, unexpired user approval.")
+    if tool.spec.requires_approval:
         authorized = (name, _canonical_arguments(arguments))
 
     authority_token = _tool_authority.set(authorized)
@@ -331,14 +339,15 @@ def _parse_reply(content: str) -> tuple[str, str]:
     candidate = content.strip()
     parsed = _extract_json_object(candidate)
     if parsed is None:
-        # Strip a stray Markdown fence rather than showing formatting artifacts.
-        candidate = candidate.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        # Normalize any Markdown fence variant so malformed JSON never leaks markup into chat.
+        candidate = re.sub(r"^\s*```(?:[a-z0-9_-]+)?\s*|\s*```\s*$", "", candidate, flags=re.IGNORECASE).strip()
         parsed = {"reply": candidate, "emotion": "neutral"}
     reply = parsed.get("reply") if isinstance(parsed, dict) else None
     emotion = parsed.get("emotion") if isinstance(parsed, dict) else None
     if not isinstance(reply, str) or not reply.strip():
         reply = candidate or "I couldn't form a response. Please try again."
-    if emotion not in ALLOWED_EMOTIONS:
+    # Model JSON can contain any type; avoid a TypeError for arrays/objects.
+    if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
         emotion = "neutral"
     return reply.strip(), emotion
 
@@ -473,7 +482,7 @@ async def _run_agent(messages: list[dict[str, Any]], preferred_model: str | None
                 if tool is None:
                     history.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"error": f"Unknown tool: {function['name']}"})})
                     continue
-                if tool.spec.destructive:
+                if tool.spec.requires_approval:
                     pending = _register_pending_approval(tool.spec.name, call["id"], arguments)
                     approvals.append({
                         "token": pending.token,

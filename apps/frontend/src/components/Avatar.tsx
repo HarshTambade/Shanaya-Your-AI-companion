@@ -15,6 +15,7 @@ const emotionAliases: Record<Emotion, string[]> = {
   neutral: [],
 };
 const emotionIcons: Record<Emotion, string> = { happy: "✨", sad: "💧", cute: "💗", neutral: "✦" };
+const cachedSceneUsers = new WeakMap<Group, number>();
 
 function cloneAvatarResources(scene: Group) {
   // useGLTF caches scenes globally. Clone per-instance GPU resources so unmount
@@ -22,9 +23,12 @@ function cloneAvatarResources(scene: Group) {
   const geometries = new Map<BufferGeometry, BufferGeometry>();
   const materials = new Set<Material>();
   const textures = new Map<Texture, Texture>();
+  const skeletonTextures = new Set<Texture>();
 
   scene.traverse((object) => {
     if (!(object instanceof Mesh)) return;
+    const skeletonTexture = (object as Mesh & { skeleton?: { boneTexture?: Texture } }).skeleton?.boneTexture;
+    if (skeletonTexture) skeletonTextures.add(skeletonTexture);
     const geometry = geometries.get(object.geometry) ?? object.geometry.clone();
     geometries.set(object.geometry, geometry);
     object.geometry = geometry;
@@ -53,6 +57,42 @@ function cloneAvatarResources(scene: Group) {
     geometries.forEach((geometry) => geometry.dispose());
     materials.forEach((material) => material.dispose());
     textures.forEach((texture) => texture.dispose());
+    skeletonTextures.forEach((texture) => texture.dispose());
+  };
+}
+
+function retainCachedAvatarScene(scene: Group) {
+  cachedSceneUsers.set(scene, (cachedSceneUsers.get(scene) ?? 0) + 1);
+  return () => {
+    const users = cachedSceneUsers.get(scene) ?? 1;
+    if (users > 1) {
+      cachedSceneUsers.set(scene, users - 1);
+      return;
+    }
+    cachedSceneUsers.delete(scene);
+    // Release Drei's shared loader cache only after other mounted clones have left.
+    setTimeout(() => {
+      if (cachedSceneUsers.has(scene)) return;
+      useGLTF.clear(modelUrl);
+      const geometries = new Set<BufferGeometry>();
+      const materials = new Set<Material>();
+      const textures = new Set<Texture>();
+      scene.traverse((object) => {
+        if (!(object instanceof Mesh)) return;
+        geometries.add(object.geometry);
+        const skeletonTexture = (object as Mesh & { skeleton?: { boneTexture?: Texture } }).skeleton?.boneTexture;
+        if (skeletonTexture) textures.add(skeletonTexture);
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+          materials.add(material);
+          for (const value of Object.values(material as unknown as Record<string, unknown>)) {
+            if (value instanceof Texture) textures.add(value);
+          }
+        }
+      });
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      textures.forEach((texture) => texture.dispose());
+    }, 0);
   };
 }
 
@@ -72,6 +112,7 @@ function Model({ emotion }: { emotion: Emotion }) {
       : new AnimationClip(animation.name, animation.duration, tracks, animation.blendMode);
   }), [animations]);
   const { actions } = useAnimations(stableAnimations, root);
+  useEffect(() => retainCachedAvatarScene(scene), [scene]);
   const bounds = useMemo(() => {
     const box = new Box3().setFromObject(avatar);
     const size = box.getSize(new Vector3());

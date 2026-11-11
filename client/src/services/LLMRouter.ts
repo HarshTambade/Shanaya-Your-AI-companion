@@ -47,14 +47,14 @@ function normalizeStep(data: any): AgentStep {
   };
 }
 
-async function requestAgentStep(url: string, body: Record<string, unknown>): Promise<AgentStep> {
+async function requestAgentStep(url: string, body: Record<string, unknown>, timeoutMs = 12_000): Promise<AgentStep> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
@@ -91,7 +91,7 @@ export function shouldUseLocalFallback(error: unknown) {
 }
 
 function parsePromptToolCalls(content: string): unknown[] {
-  const text = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const text = content.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, "");
   for (let start = 0; start < text.length; start += 1) {
     if (text[start] !== "{") continue;
     let depth = 0;
@@ -122,6 +122,7 @@ function parsePromptToolCalls(content: string): unknown[] {
 
 export class LLMRouter {
   static async resolveMode(preferred: InferenceMode, browserConnected: boolean) {
+    if (!browserConnected) return resolveInferenceMode(preferred, false);
     const network = await getNetworkStatus().catch(() => ({ connected: browserConnected }));
     return resolveInferenceMode(preferred, browserConnected && network.connected);
   }
@@ -134,12 +135,18 @@ export class LLMRouter {
       tools: tools.map(({ name, description, inputSchema }) => ({ type: "function", function: { name, description, parameters: inputSchema } })),
     };
     try {
-      return await requestAgentStep(apiUrl("/api/agent"), body);
+      return await requestAgentStep(apiUrl("/api/agent"), body, 12_000);
     } catch (primaryError) {
       if (mode !== "cloud" || !shouldUsePythonFallback(primaryError)) throw primaryError;
+      // If the connection dropped during the cloud request, let AgentRuntime
+      // switch straight to WebLLM/llama.cpp instead of waiting on an unreachable
+      // Python endpoint. A reachable local Python service still gets its cold-load budget.
+      const network = await getNetworkStatus().catch(() => ({ connected: typeof navigator === "undefined" || navigator.onLine }));
+      if (!network.connected) throw primaryError;
       const fallbackBase = import.meta.env.VITE_PYTHON_FALLBACK_URL?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
       try {
-        return await requestAgentStep(`${fallbackBase}/api/agent/step`, body);
+        // The Python route may cold-load a local llama.cpp model, so give it a longer budget.
+        return await requestAgentStep(`${fallbackBase}/api/agent/step`, body, 45_000);
       } catch (fallbackError) {
         const primaryMessage = primaryError instanceof Error ? primaryError.message : "The primary Node API failed.";
         const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "The Python fallback API failed.";

@@ -8,6 +8,7 @@ const path = require("node:path");
 let mainWindow;
 let frontendServer;
 let pythonBackend;
+let trustedFrontendOrigin;
 
 const webRoot = app.isPackaged
   ? path.join(process.resourcesPath, "frontend", "dist")
@@ -86,11 +87,25 @@ function startPythonFallback() {
 }
 
 function isTrustedMainFrame(event) {
-  return Boolean(
+  if (!(
     mainWindow
     && event.sender === mainWindow.webContents
-    && event.senderFrame === mainWindow.webContents.mainFrame,
-  );
+    && event.senderFrame === mainWindow.webContents.mainFrame
+  )) return false;
+  try {
+    // A remote or navigated page must never receive the desktop confirmation bridge.
+    return new URL(event.senderFrame.url).origin === trustedFrontendOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function parseLocalFrontendUrl(value) {
+  const url = new URL(value);
+  if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname) || url.username || url.password) {
+    throw new Error("The desktop frontend must be served from a local HTTP origin.");
+  }
+  return url;
 }
 
 function startFrontendServer() {
@@ -166,9 +181,14 @@ async function waitForDevServer(url) {
 }
 
 async function createWindow() {
-  const devUrl = process.env.SHANAYA_DEV_SERVER_URL || (!app.isPackaged ? "http://localhost:5173" : undefined);
+  // Packaged builds always use the bundled frontend; an environment override is dev-only.
+  const devUrl = app.isPackaged ? undefined : (process.env.SHANAYA_DEV_SERVER_URL || "http://localhost:5173");
+  // Validate before making even a health-check request to a developer-supplied URL.
+  if (devUrl) parseLocalFrontendUrl(devUrl);
   if (devUrl) await waitForDevServer(devUrl);
   const frontendUrl = devUrl || await startFrontendServer();
+  const parsedFrontendUrl = parseLocalFrontendUrl(frontendUrl);
+  trustedFrontendOrigin = parsedFrontendUrl.origin;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 900,
@@ -192,7 +212,7 @@ async function createWindow() {
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     try {
-      if (new URL(url).origin === new URL(frontendUrl).origin) return;
+      if (new URL(url).origin === trustedFrontendOrigin) return;
     } catch {
       // Block malformed navigation targets.
     }

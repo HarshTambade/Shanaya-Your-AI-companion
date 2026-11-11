@@ -26,8 +26,25 @@ function supportsNativeLlama() {
 }
 
 export async function getNetworkStatus() {
-  const status = await Network.getStatus();
-  return { ...status, connected: status.connected && (typeof navigator === "undefined" || navigator.onLine) };
+  // Browsers already expose offline transitions; avoid waiting on a native plugin
+  // after the platform says it has no network.
+  if (typeof navigator !== "undefined" && !navigator.onLine) return { connected: false };
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const status = await Promise.race([
+      Network.getStatus(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Network status check timed out.")), 1_000);
+      }),
+    ]);
+    return { ...status, connected: status.connected && (typeof navigator === "undefined" || navigator.onLine) };
+  } catch {
+    // A status plugin failure must not block the model router from trying a fallback.
+    return { connected: typeof navigator === "undefined" || navigator.onLine };
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 export function addNetworkStatusListener(listener: (connected: boolean) => void) {

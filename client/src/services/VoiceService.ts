@@ -122,18 +122,29 @@ export class VoiceService {
       throw new Error("Microphone access was denied. Enable it in your device settings to use voice input.");
     }
 
-    let finalTranscriptSeen = false;
-    const transcriptListener = await TalkMode.addListener("transcript", (event: TalkModeTranscriptEvent) => {
-      const transcript = event.transcript.trim();
-      if (!transcript || (event.isFinal && finalTranscriptSeen)) return;
-      if (event.isFinal) finalTranscriptSeen = true;
-      onTranscript(transcript, event.isFinal);
-    });
-    const errorListener = await TalkMode.addListener("error", (event: TalkModeErrorEvent) => {
-      onError?.(event.message);
-    });
-
+    let lastFinalTranscript = "";
+    let latestInterimTranscript = "";
+    const listeners: Array<{ remove: () => Promise<void> }> = [];
     try {
+      listeners.push(await TalkMode.addListener("transcript", (event: TalkModeTranscriptEvent) => {
+        const transcript = event.transcript.trim();
+        if (!transcript) return;
+        if (!event.isFinal) {
+          // Reset duplicate suppression when a new utterance starts, so a later
+          // final result is not discarded after the first sentence in a session.
+          if (transcript !== latestInterimTranscript) lastFinalTranscript = "";
+          latestInterimTranscript = transcript;
+          onTranscript(transcript, false);
+          return;
+        }
+        if (transcript === lastFinalTranscript) return;
+        lastFinalTranscript = transcript;
+        latestInterimTranscript = "";
+        onTranscript(transcript, true);
+      }));
+      listeners.push(await TalkMode.addListener("error", (event: TalkModeErrorEvent) => {
+        onError?.(event.message);
+      }));
       const result = await TalkMode.start({
         config: {
           stt: { engine: "web", language },
@@ -143,13 +154,17 @@ export class VoiceService {
       });
       if (!result.started) throw new Error(result.error || "TalkMode could not start speech recognition.");
     } catch (error) {
-      await Promise.all([transcriptListener.remove(), errorListener.remove()]);
+      // Remove whichever listeners were registered, even if listener setup failed midway.
+      await Promise.allSettled(listeners.map((listener) => listener.remove()));
       throw error;
     }
 
     return async () => {
-      await TalkMode.stop();
-      await Promise.all([transcriptListener.remove(), errorListener.remove()]);
+      try {
+        await TalkMode.stop();
+      } finally {
+        await Promise.allSettled(listeners.map((listener) => listener.remove()));
+      }
     };
   }
 }

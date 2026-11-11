@@ -19,7 +19,7 @@ export function mountShanayaMcpEndpoint(app, token) {
   const handler = createMcpHandler(() => createShanayaMcpServer());
   const nodeHandler = toNodeHandler(handler);
 
-  app.all("/mcp", (req, res, next) => {
+  app.all("/mcp", (req, res) => {
     if (!matchesBearerToken(req.get("authorization"), token)) {
       res.setHeader("WWW-Authenticate", "Bearer");
       return res.status(401).json({ error: "A valid Shanaya MCP bearer token is required." });
@@ -27,8 +27,11 @@ export function mountShanayaMcpEndpoint(app, token) {
 
     res.setHeader("Cache-Control", "no-store");
     void nodeHandler(req, res, req.body).catch((error) => {
-      if (res.headersSent) return res.destroy(error);
-      next(error);
+      // Avoid Express' default error handler, which may serialize provider details.
+      const errorName = error instanceof Error ? error.name : "unknown error";
+      console.error(`Shanaya MCP HTTP request failed (${errorName}).`);
+      if (res.headersSent) return res.destroy();
+      return res.status(500).json({ error: "Shanaya MCP request failed." });
     });
   });
 }

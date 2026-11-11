@@ -38,6 +38,7 @@ dracoLoader.setDecoderPath(`${publicBaseUrl}draco/`);
 const configuredAvatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim();
 const avatarModelUrl = configuredAvatarModelUrl || `${publicBaseUrl}models/avatar.draco.glb`;
 const uncompressedAvatarModelUrl = `${publicBaseUrl}models/avatar.glb`;
+const cachedSceneUsers = new WeakMap<Group, number>();
 
 export type AvatarMotion = "loading" | "animation" | "procedural" | "error";
 
@@ -82,8 +83,11 @@ function cloneAvatarResources(scene: Group) {
   const geometries = new Map<BufferGeometry, BufferGeometry>();
   const materials = new Set<Material>();
   const textures = new Map<Texture, Texture>();
+  const skeletonTextures = new Set<Texture>();
   scene.traverse((object) => {
     if (!(object instanceof Mesh)) return;
+    const skeletonTexture = (object as Mesh & { skeleton?: { boneTexture?: Texture } }).skeleton?.boneTexture;
+    if (skeletonTexture) skeletonTextures.add(skeletonTexture);
     const geometry = geometries.get(object.geometry) ?? object.geometry.clone();
     geometries.set(object.geometry, geometry);
     object.geometry = geometry;
@@ -113,7 +117,44 @@ function cloneAvatarResources(scene: Group) {
       geometries.forEach((geometry) => geometry.dispose());
       materials.forEach((material) => material.dispose());
       textures.forEach((texture) => texture.dispose());
+      skeletonTextures.forEach((texture) => texture.dispose());
     },
+  };
+}
+
+function retainCachedAvatarScene(modelUrl: string, scene: Group) {
+  cachedSceneUsers.set(scene, (cachedSceneUsers.get(scene) ?? 0) + 1);
+  return () => {
+    const users = cachedSceneUsers.get(scene) ?? 1;
+    if (users > 1) {
+      cachedSceneUsers.set(scene, users - 1);
+      return;
+    }
+    cachedSceneUsers.delete(scene);
+    // Defer cache release by one task so React StrictMode's development-only
+    // mount/cleanup/remount cycle can reclaim the scene before it is disposed.
+    setTimeout(() => {
+      if (cachedSceneUsers.has(scene)) return;
+      useGLTF.clear(modelUrl);
+      const geometries = new Set<BufferGeometry>();
+      const materials = new Set<Material>();
+      const textures = new Set<Texture>();
+      scene.traverse((object) => {
+        if (!(object instanceof Mesh)) return;
+        geometries.add(object.geometry);
+        const skeletonTexture = (object as Mesh & { skeleton?: { boneTexture?: Texture } }).skeleton?.boneTexture;
+        if (skeletonTexture) textures.add(skeletonTexture);
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+          materials.add(material);
+          for (const value of Object.values(material as unknown as Record<string, unknown>)) {
+            if (value instanceof Texture) textures.add(value);
+          }
+        }
+      });
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      textures.forEach((texture) => texture.dispose());
+    }, 0);
   };
 }
 
@@ -141,6 +182,8 @@ function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMot
   }), [animations]);
   const { actions } = useAnimations(stableAnimations, group);
   const { camera, size } = useThree();
+
+  useEffect(() => retainCachedAvatarScene(modelUrl, scene), [modelUrl, scene]);
 
   useEffect(() => {
     applyEmotionMorph(avatar, emotion);

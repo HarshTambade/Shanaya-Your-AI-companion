@@ -19,7 +19,7 @@ const agentRules = [
 ].join(" ");
 
 function extractObject(text: string): Record<string, unknown> | null {
-  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const candidate = text.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, "");
   for (let start = 0; start < candidate.length; start += 1) {
     if (candidate[start] !== "{") continue;
     let depth = 0;
@@ -52,7 +52,7 @@ function extractObject(text: string): Record<string, unknown> | null {
 
 function parseReply(text: string): AgentReply {
   const parsed = extractObject(text);
-  const plainText = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const plainText = text.trim().replace(/^```(?:[a-z0-9_-]+)?\s*/i, "").replace(/\s*```$/, "");
   const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : plainText;
   const emotion = parsed?.emotion;
   if (!reply) throw new Error("The agent returned an empty reply.");
