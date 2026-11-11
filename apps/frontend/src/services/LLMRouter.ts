@@ -31,14 +31,33 @@ const allowedEmotions = new Set<Emotion>(["happy", "sad", "cute", "neutral"]);
 
 function parseStructuredReply(content: unknown): { reply: string; emotion: Emotion } {
   if (typeof content !== "string") throw new Error("The model returned an empty response.");
-  const trimmed = content.trim();
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   let value: unknown = trimmed;
-  try {
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}") + 1;
-    if (start >= 0 && end > start) value = JSON.parse(trimmed.slice(start, end));
-  } catch {
-    value = trimmed;
+  for (let start = 0; start < trimmed.length; start += 1) {
+    if (trimmed[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < trimmed.length; index += 1) {
+      const character = trimmed[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}" && --depth === 0) {
+        try {
+          value = JSON.parse(trimmed.slice(start, index + 1));
+        } catch {
+          continue;
+        }
+        break;
+      }
+    }
+    if (value !== trimmed) break;
   }
   if (value && typeof value === "object" && "reply" in value) {
     const parsed = value as { reply?: unknown; emotion?: unknown };
@@ -100,10 +119,11 @@ export async function routeAgent(
 }
 
 export async function resolveApproval(token: string, approved: boolean): Promise<{ approved: boolean; tool_call_id: string; result: unknown }> {
-  const response = await fetch(endpoint(`/api/approvals/${encodeURIComponent(token)}`), {
+  // Keep one-use approval tokens out of URL/access logs.
+  const response = await fetch(endpoint("/api/approvals"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approved }),
+    body: JSON.stringify({ token, approved }),
   });
   return readJson(response);
 }

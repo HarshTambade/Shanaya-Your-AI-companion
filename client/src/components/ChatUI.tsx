@@ -37,8 +37,10 @@ const modeDetails: Record<InferenceMode, { label: string; description: string; i
 };
 
 function modelLabel(model: string) {
-  if (model === "openai/gpt-oss-120b") return "GPT-OSS 120B · Groq default";
+  if (model === "openai/gpt-oss-120b") return "GPT-OSS 120B · Groq primary";
   if (model === "openai/gpt-oss-20b") return "GPT-OSS 20B · Groq fallback";
+  if (model === "llama-3.3-70b-versatile") return "Llama 3.3 70B · Groq Enterprise";
+  if (model === "llama-3.1-8b-instant") return "Llama 3.1 8B · Groq Enterprise";
   return model;
 }
 
@@ -111,6 +113,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [callDuration, setCallDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [prepareWebFallback, setPrepareWebFallback] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [nativeStatus, setNativeStatus] = useState<OfflineModelStatus>("checking");
   const [isPreparingNative, setIsPreparingNative] = useState(false);
@@ -133,7 +136,10 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const isNative = platform === "ios" || platform === "android";
   const desktopAvailable = hasDesktopBridge();
   const effectiveMode = resolveInferenceMode(mode, isOnline);
-  const localLLM = useBrowserLLM(effectiveMode === "webllm" ? WEBLLM_MODEL : undefined);
+  const localLLM = useBrowserLLM(effectiveMode === "webllm" || prepareWebFallback ? WEBLLM_MODEL : undefined);
+  const localLLMRef = useRef(localLLM);
+  // Keep in-flight API fallback work connected to the hook's latest load state.
+  localLLMRef.current = localLLM;
   const selectedMode = effectiveMode === "cloud"
     ? {
       ...modeDetails.cloud,
@@ -292,7 +298,18 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
           messages: nextMessages,
           generateLocal: async (prompt, routeMode) => {
             if (routeMode === "webllm") {
-              return localLLM.generate([{ role: "system", content: agentRules }, { role: "user", content: prompt }]);
+              setPrepareWebFallback(true);
+              const messages = [{ role: "system" as const, content: agentRules }, { role: "user" as const, content: prompt }];
+              const deadline = Date.now() + 180_000;
+              while (Date.now() < deadline) {
+                const local = localLLMRef.current;
+                if (local.status === "ready") return local.generate(messages);
+                if (local.status === "unsupported") throw new Error("This browser does not support WebGPU local AI. Prepare the native model in the mobile app or reconnect to Groq.");
+                if (local.status === "error") throw new Error("The local WebLLM model could not load. Reconnect once to download it, then retry offline.");
+                setAgentActivity({ phase: "thinking", message: local.status === "loading" ? `Preparing local AI · ${Math.round(local.progress * 100)}%` : "Starting local AI…" });
+                await new Promise((resolve) => window.setTimeout(resolve, 300));
+              }
+              throw new Error("Local WebLLM took too long to prepare. Check WebGPU support and model download access.");
             }
             if (routeMode === "native") return generateOfflineReply([{ role: "user", content: prompt }]);
             throw new Error("The selected agent mode is unavailable.");
@@ -410,10 +427,6 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       voiceSessionRef.current = await VoiceService.startSession(speechLanguage, (transcript, isFinal) => {
         setInput(transcript);
         if (isFinal) {
-          const stop = voiceSessionRef.current;
-          voiceSessionRef.current = null;
-          setIsListening(false);
-          void stop?.();
           void submitMessage(undefined, transcript, callSpeakerRef.current);
         }
       }, (message) => {

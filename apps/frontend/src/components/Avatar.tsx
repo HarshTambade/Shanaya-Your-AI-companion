@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Html, OrbitControls, useAnimations, useGLTF } from "@react-three/drei";
-import { DRACOLoader } from "three-stdlib";
-import { Box3, Group, MathUtils, Mesh, PerspectiveCamera, Vector3 } from "three";
+import { DRACOLoader, SkeletonUtils } from "three-stdlib";
+import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
 import type { Emotion } from "../services/LLMRouter";
 
 const modelUrl = "/models/avatar.glb";
@@ -11,20 +11,69 @@ dracoLoader.setDecoderPath("/draco/");
 const emotionAliases: Record<Emotion, string[]> = {
   happy: ["happy", "smile", "joy"],
   sad: ["sad", "frown"],
-  angry: ["angry", "mad", "browdown"],
   cute: ["cute", "smile", "blush"],
   neutral: [],
 };
-const emotionIcons: Record<Emotion, string> = { happy: "✨", sad: "💧", angry: "🔥", cute: "💗", neutral: "✦" };
+const emotionIcons: Record<Emotion, string> = { happy: "✨", sad: "💧", cute: "💗", neutral: "✦" };
+
+function cloneAvatarResources(scene: Group) {
+  // useGLTF caches scenes globally. Clone per-instance GPU resources so unmount
+  // cleanup never disposes resources used by another avatar or the GLTF cache.
+  const geometries = new Map<BufferGeometry, BufferGeometry>();
+  const materials = new Set<Material>();
+  const textures = new Map<Texture, Texture>();
+
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    const geometry = geometries.get(object.geometry) ?? object.geometry.clone();
+    geometries.set(object.geometry, geometry);
+    object.geometry = geometry;
+
+    const cloneMaterial = (material: Material) => {
+      const clone = material.clone();
+      materials.add(clone);
+      for (const [key, value] of Object.entries(clone as unknown as Record<string, unknown>)) {
+        if (!(value instanceof Texture)) continue;
+        let texture = textures.get(value);
+        if (!texture) {
+          texture = value.clone();
+          texture.needsUpdate = true;
+          textures.set(value, texture);
+        }
+        (clone as unknown as Record<string, unknown>)[key] = texture;
+      }
+      return clone;
+    };
+    object.material = Array.isArray(object.material)
+      ? object.material.map(cloneMaterial)
+      : cloneMaterial(object.material);
+  });
+
+  return () => {
+    geometries.forEach((geometry) => geometry.dispose());
+    materials.forEach((material) => material.dispose());
+    textures.forEach((texture) => texture.dispose());
+  };
+}
 
 function Model({ emotion }: { emotion: Emotion }) {
   const { scene, animations } = useGLTF(modelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
+  // SkeletonUtils preserves skinned meshes and isolates this avatar from the
+  // shared GLTF scene and other mounted instances.
+  const avatar = useMemo(() => SkeletonUtils.clone(scene) as Group, [scene]);
   const root = useRef<Group>(null);
   const model = useRef<Group>(null);
   const modelScaleInitialized = useRef(false);
-  const { actions } = useAnimations(animations, root);
+  const stableAnimations = useMemo(() => animations.map((animation) => {
+    // Idle clips may key facial morphs to zero, making the face flicker or vanish.
+    const tracks = animation.tracks.filter(({ name }) => !name.toLowerCase().includes("morphtargetinfluences"));
+    return tracks.length === animation.tracks.length
+      ? animation
+      : new AnimationClip(animation.name, animation.duration, tracks, animation.blendMode);
+  }), [animations]);
+  const { actions } = useAnimations(stableAnimations, root);
   const bounds = useMemo(() => {
-    const box = new Box3().setFromObject(scene);
+    const box = new Box3().setFromObject(avatar);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
     return {
@@ -32,10 +81,10 @@ function Model({ emotion }: { emotion: Emotion }) {
       width: size.x,
       position: [-center.x, -box.min.y, -center.z] as [number, number, number],
     };
-  }, [scene]);
+  }, [avatar]);
 
   useEffect(() => {
-    scene.traverse((object) => {
+    avatar.traverse((object) => {
       const mesh = object as Mesh;
       if (!mesh.morphTargetDictionary || !mesh.morphTargetInfluences) return;
       mesh.morphTargetInfluences.fill(0);
@@ -44,14 +93,16 @@ function Model({ emotion }: { emotion: Emotion }) {
         if (aliases.some((alias) => name.toLowerCase().includes(alias))) mesh.morphTargetInfluences[index] = 1;
       }
     });
-  }, [emotion, scene]);
+  }, [emotion, avatar]);
+
+  useEffect(() => cloneAvatarResources(avatar), [avatar]);
 
   useEffect(() => {
-    const idleClip = animations.find((clip) => /idle|stand|breath/i.test(clip.name)) ?? animations[0];
+    const idleClip = stableAnimations.find((clip) => /idle|stand|breath/i.test(clip.name)) ?? stableAnimations[0];
     const action = idleClip ? actions[idleClip.name] : undefined;
     action?.reset().fadeIn(0.5).play();
     return () => { action?.fadeOut(0.2); };
-  }, [actions, animations]);
+  }, [actions, stableAnimations]);
 
   useFrame(({ clock, camera, size }, delta) => {
     if (!root.current) return;
@@ -91,7 +142,8 @@ function Model({ emotion }: { emotion: Emotion }) {
   return (
     <group ref={root}>
       <group ref={model} position={bounds.position}>
-        <primitive object={scene} />
+        {/* Per-instance geometry/material/texture clones are disposed on unmount. */}
+        <primitive object={avatar} dispose={null} />
         <Html position={[0.42, bounds.height * 0.92, 0.12]} center distanceFactor={7} zIndexRange={[10, 0]}>
           <span aria-label={`Shanaya feels ${emotion}`} className="rounded-full border border-white/15 bg-slate-950/80 px-2 py-1 text-sm shadow-lg backdrop-blur">{emotionIcons[emotion]}</span>
         </Html>

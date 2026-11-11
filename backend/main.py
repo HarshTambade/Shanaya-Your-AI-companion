@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import time
@@ -46,6 +48,7 @@ CLIENT_FALLBACK_SYSTEM_PROMPT = " ".join([
 MAX_AGENT_ROUNDS = 8
 MAX_TOOL_OUTPUT_CHARS = 24_000
 APPROVAL_TTL_SECONDS = max(30, int(os.getenv("APPROVAL_TTL_SECONDS", "180")))
+MAX_PENDING_APPROVALS = 128
 WORKSPACE = Path(os.getenv("SHANAYA_WORKSPACE", ".")).expanduser().resolve()
 WORKSPACE.mkdir(parents=True, exist_ok=True)
 
@@ -129,6 +132,20 @@ class ToolRegistry:
 tools = ToolRegistry()
 pending_approvals: dict[str, PendingApproval] = {}
 sense_events: deque[dict[str, Any]] = deque(maxlen=500)
+# MCP dispatch runs inside the same request context. Destructive handlers check
+# this capability independently, so a future call path cannot skip HITL.
+_tool_authority: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
+    "shanaya_tool_authority", default=None
+)
+
+
+def _canonical_arguments(arguments: dict[str, Any]) -> str:
+    return json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _require_tool_authority(name: str, arguments: dict[str, Any]) -> None:
+    if _tool_authority.get() != (name, _canonical_arguments(arguments)):
+        raise PermissionError(f"The {name} tool requires a matching, explicit user approval.")
 
 
 def _workspace_path(raw_path: str) -> Path:
@@ -233,11 +250,13 @@ def mcp_system_status() -> dict[str, Any]:
 
 @mcp_server.tool(name="write_file", description="Write a UTF-8 text file inside the configured workspace. Requires explicit Shanaya host approval.")
 def mcp_write_file(path: str, content: str) -> dict[str, Any]:
+    _require_tool_authority("write_file", {"path": path, "content": content})
     return _write_file(path, content)
 
 
 @mcp_server.tool(name="execute_shell", description="Run a restricted shell command in the configured workspace. Requires explicit Shanaya host approval.")
 async def mcp_execute_shell(command: str) -> dict[str, Any]:
+    _require_tool_authority("execute_shell", {"command": command})
     return await _execute_shell(command)
 
 
@@ -246,6 +265,16 @@ def _clean_pending_approvals() -> None:
     expired = [token for token, pending in pending_approvals.items() if now - pending.created_at > APPROVAL_TTL_SECONDS]
     for token in expired:
         pending_approvals.pop(token, None)
+
+
+def _register_pending_approval(name: str, call_id: str, arguments: dict[str, Any]) -> PendingApproval:
+    _clean_pending_approvals()
+    if len(pending_approvals) >= MAX_PENDING_APPROVALS:
+        raise HTTPException(status_code=429, detail="Too many actions are awaiting confirmation. Resolve one before requesting another.")
+    token = secrets.token_urlsafe(32)
+    pending = PendingApproval(token, name, call_id, arguments, time.time())
+    pending_approvals[token] = pending
+    return pending
 
 
 def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
@@ -258,14 +287,34 @@ def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
     raise ValueError("Tool arguments must be a JSON object.")
 
 
-async def _execute_registered_tool(name: str, arguments: dict[str, Any], mcp_client: Any | None = None) -> Any:
+async def _execute_registered_tool(
+    name: str,
+    arguments: dict[str, Any],
+    mcp_client: Any | None = None,
+    approval: PendingApproval | None = None,
+) -> Any:
     tool = tools.get(name)
     if tool is None:
         raise ValueError(f"Unknown tool: {name}")
-    if mcp_client is None:
-        async with Client(mcp_server) as client:
-            return await _call_mcp_tool(client, name, arguments)
-    return await _call_mcp_tool(mcp_client, name, arguments)
+    authorized = None
+    if tool.spec.destructive:
+        if (
+            approval is None
+            or approval.tool_name != name
+            or _canonical_arguments(approval.arguments) != _canonical_arguments(arguments)
+            or time.time() - approval.created_at > APPROVAL_TTL_SECONDS
+        ):
+            raise PermissionError(f"The {name} tool requires a matching, unexpired user approval.")
+        authorized = (name, _canonical_arguments(arguments))
+
+    authority_token = _tool_authority.set(authorized)
+    try:
+        if mcp_client is None:
+            async with Client(mcp_server) as client:
+                return await _call_mcp_tool(client, name, arguments)
+        return await _call_mcp_tool(mcp_client, name, arguments)
+    finally:
+        _tool_authority.reset(authority_token)
 
 
 async def _call_mcp_tool(mcp_client: Any, name: str, arguments: dict[str, Any]) -> Any:
@@ -280,11 +329,10 @@ async def _call_mcp_tool(mcp_client: Any, name: str, arguments: dict[str, Any]) 
 
 def _parse_reply(content: str) -> tuple[str, str]:
     candidate = content.strip()
-    try:
-        start = candidate.index("{")
-        end = candidate.rindex("}") + 1
-        parsed = json.loads(candidate[start:end])
-    except (ValueError, json.JSONDecodeError):
+    parsed = _extract_json_object(candidate)
+    if parsed is None:
+        # Strip a stray Markdown fence rather than showing formatting artifacts.
+        candidate = candidate.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         parsed = {"reply": candidate, "emotion": "neutral"}
     reply = parsed.get("reply") if isinstance(parsed, dict) else None
     emotion = parsed.get("emotion") if isinstance(parsed, dict) else None
@@ -293,6 +341,88 @@ def _parse_reply(content: str) -> tuple[str, str]:
     if emotion not in ALLOWED_EMOTIONS:
         emotion = "neutral"
     return reply.strip(), emotion
+
+
+def _extract_json_object(content: str) -> dict[str, Any] | None:
+    candidate = content.strip().lstrip("\ufeff")
+    if candidate.startswith("```"):
+        candidate = candidate.split("\n", 1)[-1]
+        if candidate.endswith("```"):
+            candidate = candidate[:-3].strip()
+    decoder = json.JSONDecoder()
+    for start, character in enumerate(candidate):
+        if character != "{":
+            continue
+        try:
+            value, _end = decoder.raw_decode(candidate[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _safe_messages(
+    messages: list[dict[str, Any]],
+    system_prompt: str,
+    allowed_roles: set[str],
+    *,
+    allow_tool_calls: bool = False,
+    known_tool_names: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Discard caller supplied system prompts and retain only bounded message fields."""
+    safe: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    for message in messages:
+        if not isinstance(message, dict):
+            raise HTTPException(status_code=400, detail="A conversation message is invalid.")
+        role = message.get("role")
+        if role == "system":
+            continue
+        if role not in allowed_roles:
+            raise HTTPException(status_code=400, detail="Message role is invalid.")
+        content = message.get("content", "")
+        if not isinstance(content, (str, list, dict)) or len(json.dumps(content, ensure_ascii=False)) > 32_000:
+            raise HTTPException(status_code=413, detail="A conversation message is too large or invalid.")
+        clean: dict[str, Any] = {"role": role, "content": content}
+        if role == "tool":
+            call_id = message.get("tool_call_id")
+            if not isinstance(call_id, str) or not call_id or len(call_id) > 128:
+                raise HTTPException(status_code=400, detail="A tool result is missing its call identifier.")
+            clean["tool_call_id"] = call_id
+        if "tool_calls" in message:
+            if role != "assistant" or not allow_tool_calls:
+                raise HTTPException(status_code=400, detail="Tool-call history is not allowed for this request.")
+            tool_calls = message["tool_calls"]
+            if not isinstance(tool_calls, list) or len(tool_calls) > 8:
+                raise HTTPException(status_code=400, detail="Assistant tool-call history is invalid.")
+            safe_calls: list[dict[str, Any]] = []
+            for call in tool_calls:
+                function = call.get("function") if isinstance(call, dict) else None
+                name = function.get("name") if isinstance(function, dict) else None
+                call_id = call.get("id") if isinstance(call, dict) else None
+                if (
+                    not isinstance(call_id, str)
+                    or not call_id
+                    or len(call_id) > 128
+                    or not isinstance(name, str)
+                    or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) is None
+                    or (known_tool_names is not None and name not in known_tool_names)
+                ):
+                    raise HTTPException(status_code=400, detail="Assistant tool-call history is invalid.")
+                try:
+                    arguments = _parse_tool_arguments(function.get("arguments", "{}"))
+                except (ValueError, json.JSONDecodeError) as exc:
+                    raise HTTPException(status_code=400, detail="Assistant tool-call arguments are invalid.") from exc
+                if len(_canonical_arguments(arguments)) > 16_000:
+                    raise HTTPException(status_code=413, detail="Assistant tool-call arguments are too large.")
+                safe_calls.append({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": _canonical_arguments(arguments)},
+                })
+            clean["tool_calls"] = safe_calls
+        safe.append(clean)
+    return safe
 
 
 def _tool_call_for_history(call: dict[str, Any]) -> dict[str, Any]:
@@ -308,9 +438,13 @@ def _tool_call_for_history(call: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _run_agent(messages: list[dict[str, Any]], preferred_model: str | None) -> dict[str, Any]:
-    history = [dict(message) for message in messages]
-    if not any(message.get("role") == "system" for message in history):
-        history.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+    history = _safe_messages(
+        messages,
+        SYSTEM_PROMPT,
+        {"user", "assistant", "tool"},
+        allow_tool_calls=True,
+        known_tool_names={spec["name"] for spec in tools.public_schemas()},
+    )
     last_provider = ""
     last_model = ""
 
@@ -340,10 +474,9 @@ async def _run_agent(messages: list[dict[str, Any]], preferred_model: str | None
                     history.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps({"error": f"Unknown tool: {function['name']}"})})
                     continue
                 if tool.spec.destructive:
-                    token = secrets.token_urlsafe(32)
-                    pending_approvals[token] = PendingApproval(token, tool.spec.name, call["id"], arguments, time.time())
+                    pending = _register_pending_approval(tool.spec.name, call["id"], arguments)
                     approvals.append({
-                        "token": token,
+                        "token": pending.token,
                         "tool_call_id": call["id"],
                         "name": tool.spec.name,
                         "description": tool.spec.description,
@@ -384,6 +517,7 @@ class AgentStepRequest(BaseModel):
 
 
 class ApprovalRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=128)
     approved: bool
 
 
@@ -410,9 +544,7 @@ async def list_tools() -> list[dict[str, Any]]:
 
 @app.post("/api/chat")
 async def chat(payload: AgentRequest) -> dict[str, Any]:
-    messages = [dict(message) for message in payload.messages]
-    if not any(message.get("role") == "system" for message in messages):
-        messages.insert(0, {"role": "system", "content": SYSTEM_PROMPT})
+    messages = _safe_messages(payload.messages, SYSTEM_PROMPT, {"user", "assistant"})
     try:
         response = await router.complete(messages, preferred_model=payload.model)
     except LLMRouterError as exc:
@@ -428,12 +560,12 @@ async def agent_step(payload: AgentStepRequest) -> dict[str, Any]:
     This endpoint never executes tools. The client validates returned calls and
     runs its own device tools and confirmation flows as usual.
     """
-    messages = [dict(message) for message in payload.messages]
-    for message in messages:
-        if message.get("role") not in {"system", "user", "assistant", "tool"}:
-            raise HTTPException(status_code=400, detail="Message role is invalid.")
-        if len(json.dumps(message, ensure_ascii=False)) > 32_000:
-            raise HTTPException(status_code=413, detail="A conversation message is too large.")
+    messages = _safe_messages(
+        payload.messages,
+        CLIENT_FALLBACK_SYSTEM_PROMPT,
+        {"user", "assistant", "tool"},
+        allow_tool_calls=True,
+    )
 
     schemas: list[dict[str, Any]] = []
     for tool in payload.tools:
@@ -458,8 +590,6 @@ async def agent_step(payload: AgentStepRequest) -> dict[str, Any]:
             },
         })
 
-    if not any(message.get("role") == "system" for message in messages):
-        messages.insert(0, {"role": "system", "content": CLIENT_FALLBACK_SYSTEM_PROMPT})
     try:
         response = await router.complete(messages, tools=schemas, preferred_model=payload.model)
     except LLMRouterError as exc:
@@ -469,27 +599,23 @@ async def agent_step(payload: AgentStepRequest) -> dict[str, Any]:
 
 @app.post("/api/agent")
 async def agent(payload: AgentRequest) -> dict[str, Any]:
-    for message in payload.messages:
-        if message.get("role") not in {"system", "user", "assistant", "tool"}:
-            raise HTTPException(status_code=400, detail="Message role is invalid.")
-        if len(json.dumps(message, ensure_ascii=False)) > 32_000:
-            raise HTTPException(status_code=413, detail="A conversation message is too large.")
     try:
         return await _run_agent(payload.messages, payload.model)
     except LLMRouterError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@app.post("/api/approvals/{token}")
-async def resolve_approval(token: str, payload: ApprovalRequest) -> dict[str, Any]:
+@app.post("/api/approvals")
+async def resolve_approval(payload: ApprovalRequest) -> dict[str, Any]:
     _clean_pending_approvals()
-    pending = pending_approvals.pop(token, None)
+    # Tokens stay in the request body so ordinary access logs never capture them.
+    pending = pending_approvals.pop(payload.token, None)
     if pending is None:
         raise HTTPException(status_code=404, detail="This confirmation is missing, expired, or already used.")
     if not payload.approved:
         return {"approved": False, "tool_call_id": pending.tool_call_id, "result": {"error": "The user denied this action."}}
     try:
-        result = await _execute_registered_tool(pending.tool_name, pending.arguments)
+        result = await _execute_registered_tool(pending.tool_name, pending.arguments, approval=pending)
         return {"approved": True, "tool_call_id": pending.tool_call_id, "result": result}
     except Exception as exc:
         return {"approved": True, "tool_call_id": pending.tool_call_id, "result": {"error": str(exc)}}

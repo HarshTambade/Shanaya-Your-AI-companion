@@ -38,8 +38,14 @@ function installShanayaComputerBridge(mainWindow) {
   let lastImageSize = null;
   const approvals = new Map();
   const allowedActions = new Set(["session", "screenshot", "left_click", "right_click", "middle_click", "double_click", "left_click_drag", "mouse_move", "scroll", "type", "key", "wait"]);
+  const assertTrustedFrame = (event) => {
+    if (event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+      throw new Error("Desktop controls are available only to the trusted Shanaya window.");
+    }
+  };
 
-  ipcMain.handle("shanaya:computer:confirm", async (_event, request) => {
+  ipcMain.handle("shanaya:computer:confirm", async (event, request) => {
+    assertTrustedFrame(event);
     const action = String(request?.action || "");
     const approvalRequest = request?.input && typeof request.input === "object" ? request.input : {};
     const input = approvalRequest.input && typeof approvalRequest.input === "object" ? approvalRequest.input : {};
@@ -73,7 +79,8 @@ function installShanayaComputerBridge(mainWindow) {
     }
   };
 
-  ipcMain.handle("shanaya:computer:screenshot", async (_event, token) => {
+  ipcMain.handle("shanaya:computer:screenshot", async (event, token) => {
+    assertTrustedFrame(event);
     consumeApproval(token, "screenshot", {});
     const image = await screenshotDesktop({ format: "png" });
     const original = sharp(image);
@@ -84,7 +91,8 @@ function installShanayaComputerBridge(mainWindow) {
     return { base64: jpeg.data.toString("base64"), mediaType: "image/jpeg" };
   });
 
-  ipcMain.handle("shanaya:computer:perform", async (_event, request) => {
+  ipcMain.handle("shanaya:computer:perform", async (event, request) => {
+    assertTrustedFrame(event);
     const action = String(request?.action || "");
     const input = request?.input && typeof request.input === "object" ? request.input : {};
     consumeApproval(request?.approvalToken, action, input);

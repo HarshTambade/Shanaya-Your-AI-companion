@@ -1,6 +1,6 @@
 import type { ChatMessage, Emotion, InferenceMode } from "../types";
 import { getDeviceTools, type ShanayaTool } from "./DeviceTools";
-import { LLMRouter, type AgentMessage, type AgentToolCall } from "./LLMRouter";
+import { LLMRouter, shouldUseLocalFallback, type AgentMessage, type AgentToolCall } from "./LLMRouter";
 import { getNativeMemoryTools } from "./MobileAgent";
 
 const emotionNames = new Set<Emotion>(["happy", "sad", "angry", "neutral", "surprised", "thinking"]);
@@ -19,19 +19,41 @@ const agentRules = [
 ].join(" ");
 
 function extractObject(text: string): Record<string, unknown> | null {
-  const candidate = text.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) return null;
-  try {
-    const result = JSON.parse(candidate);
-    return result && typeof result === "object" && !Array.isArray(result) ? result : null;
-  } catch {
-    return null;
+  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  for (let start = 0; start < candidate.length; start += 1) {
+    if (candidate[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < candidate.length; index += 1) {
+      const character = candidate[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}" && --depth === 0) {
+        try {
+          const result: unknown = JSON.parse(candidate.slice(start, index + 1));
+          return result && typeof result === "object" && !Array.isArray(result)
+            ? result as Record<string, unknown>
+            : null;
+        } catch {
+          break;
+        }
+      }
+    }
   }
+  return null;
 }
 
 function parseReply(text: string): AgentReply {
   const parsed = extractObject(text);
-  const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : text.trim();
+  const plainText = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : plainText;
   const emotion = parsed?.emotion;
   if (!reply) throw new Error("The agent returned an empty reply.");
   return { reply, emotion: typeof emotion === "string" && emotionNames.has(emotion as Emotion) ? emotion as Emotion : "neutral" };
@@ -90,9 +112,10 @@ export async function runAgentTurn(options: {
   const conversation: AgentMessage[] = options.messages
     .filter((message): message is ChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
     .map(({ role, content }) => ({ role, content }));
+  let preferredMode = options.mode;
 
   for (let turn = 0; turn < maxToolTurns; turn += 1) {
-    const mode = await LLMRouter.resolveMode(options.mode, typeof navigator === "undefined" || navigator.onLine);
+    let mode = await LLMRouter.resolveMode(preferredMode, typeof navigator === "undefined" || navigator.onLine);
     if (mode === "native" && !memoryToolsLoaded) {
       memoryToolsLoaded = true;
       try {
@@ -107,10 +130,22 @@ export async function runAgentTurn(options: {
     let toolCalls: AgentToolCall[] = [];
     if (mode === "cloud" || mode === "ollama") {
       trimConversation(conversation);
-      const step = await LLMRouter.requestStep(mode, conversation, tools, options.model);
-      content = step.content;
-      if (step.toolCalls.length > 8) throw new Error("The model requested too many tools at once.");
-      toolCalls = step.toolCalls;
+      try {
+        const step = await LLMRouter.requestStep(mode, conversation, tools, options.model);
+        content = step.content;
+        if (step.toolCalls.length > 8) throw new Error("The model requested too many tools at once.");
+        toolCalls = step.toolCalls;
+      } catch (error) {
+        if (!shouldUseLocalFallback(error)) throw error;
+        mode = await LLMRouter.resolveMode("cloud", false);
+        preferredMode = mode;
+        options.onActivity?.({ phase: "thinking", message: "Cloud AI is unavailable · switching to on-device AI…" });
+        const localText = await options.generateLocal(createLocalPrompt(conversation, tools), mode);
+        const step = parseLocalStep(localText);
+        if (step.reply) return step.reply;
+        content = localText;
+        toolCalls = step.toolCalls;
+      }
     } else {
       const localText = await options.generateLocal(createLocalPrompt(conversation, tools), mode);
       const step = parseLocalStep(localText);

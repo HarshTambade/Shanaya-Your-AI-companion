@@ -86,7 +86,11 @@ jobs:
             fi
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi
-          npm run pack
+          # GitHub Releases are published by the dedicated release job below.
+          # Do not let electron-builder attempt an automatic Snap Store upload;
+          # snapcraft is not installed on the runner and Snap is not required
+          # for the release assets staged by this workflow.
+          npm run pack -- --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: shanaya-electron-${{ matrix.os }}

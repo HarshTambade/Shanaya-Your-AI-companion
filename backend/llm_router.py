@@ -9,19 +9,20 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 logger = logging.getLogger("shanaya.llm")
 ALLOWED_EMOTIONS = {"happy", "sad", "cute", "neutral"}
 DEFAULT_GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
     "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+NETWORK_TIMEOUT = httpx.Timeout(90.0, connect=3.0, read=90.0, write=10.0, pool=5.0)
 
 
 def _csv(name: str, default: str = "") -> list[str]:
@@ -119,13 +120,21 @@ class LLMRouter:
         preferred_model: str | None = None,
     ) -> ModelResponse:
         errors: list[str] = []
+        cloud_unreachable = False
         for candidate in self._ordered_candidates(preferred_model):
+            # A broken network path should not make every cloud model wait for
+            # its own timeout. Try the first local candidate immediately.
+            if cloud_unreachable and candidate.tier < 3:
+                continue
             try:
                 result = await self._call(candidate, messages, tools or [])
                 return self._normalize(result, candidate)
             except Exception as exc:  # Provider errors intentionally trigger the next candidate.
-                errors.append(f"{candidate.provider}/{candidate.model}: {type(exc).__name__}")
-                logger.warning("Model request failed for %s/%s (%s)", candidate.provider, candidate.model, type(exc).__name__)
+                error_name = type(exc).__name__
+                errors.append(f"{candidate.provider}/{candidate.model}: {error_name}")
+                logger.warning("Model request failed for %s/%s (%s)", candidate.provider, candidate.model, error_name)
+                if candidate.tier < 3 and self._is_transport_failure(exc):
+                    cloud_unreachable = True
         details = "; ".join(errors) if errors else "no API keys or local model are configured"
         raise LLMRouterError(f"All configured model routes failed: {details}")
 
@@ -138,7 +147,7 @@ class LLMRouter:
         client = AsyncOpenAI(
             api_key=candidate.api_key,
             base_url=candidate.base_url,
-            timeout=90.0,
+            timeout=NETWORK_TIMEOUT,
             max_retries=0,
         )
         try:
@@ -196,7 +205,7 @@ class LLMRouter:
                 "description": function.get("description", ""),
                 "input_schema": function.get("parameters", {"type": "object", "properties": {}}),
             })
-        client = AsyncAnthropic(api_key=candidate.api_key, timeout=90.0, max_retries=0)
+        client = AsyncAnthropic(api_key=candidate.api_key, timeout=NETWORK_TIMEOUT, max_retries=0)
         try:
             params: dict[str, Any] = {
                 "model": candidate.model,
@@ -267,12 +276,24 @@ class LLMRouter:
 
     @staticmethod
     def _structured_json(content: str) -> str:
-        candidate_text = content.strip()
-        try:
-            start = candidate_text.index("{")
-            end = candidate_text.rindex("}") + 1
-            parsed = json.loads(candidate_text[start:end])
-        except (ValueError, json.JSONDecodeError):
+        candidate_text = content.strip().lstrip("\ufeff")
+        if candidate_text.startswith("```"):
+            candidate_text = candidate_text.split("\n", 1)[-1]
+            if candidate_text.endswith("```"):
+                candidate_text = candidate_text[:-3].strip()
+        decoder = json.JSONDecoder()
+        parsed: Any = None
+        for start, character in enumerate(candidate_text):
+            if character != "{":
+                continue
+            try:
+                value, _end = decoder.raw_decode(candidate_text[start:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                parsed = value
+                break
+        if parsed is None:
             parsed = {"reply": candidate_text, "emotion": "neutral"}
         reply = parsed.get("reply") if isinstance(parsed, dict) else None
         emotion = parsed.get("emotion") if isinstance(parsed, dict) else None
@@ -281,6 +302,20 @@ class LLMRouter:
         if emotion not in ALLOWED_EMOTIONS:
             emotion = "neutral"
         return json.dumps({"reply": reply.strip(), "emotion": emotion}, ensure_ascii=False)
+
+    @staticmethod
+    def _is_transport_failure(error: Exception) -> bool:
+        if isinstance(error, httpx.TransportError):
+            return True
+        # SDK connection and timeout wrappers preserve only the exception class
+        # at this boundary; do not inspect or log messages that could contain
+        # request headers or user data.
+        return type(error).__name__ in {
+            "APIConnectionError",
+            "APITimeoutError",
+            "ConnectionError",
+            "TimeoutError",
+        }
 
 
 router = LLMRouter()

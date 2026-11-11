@@ -264,13 +264,17 @@ Groq is the default cloud provider. Add your server-side Groq API key to `server
 
 ```dotenv
 PORT=3001
+HOST=127.0.0.1
 CLIENT_ORIGIN=http://localhost:5173,capacitor://localhost,http://localhost,https://localhost
 GROQ_API_KEY=your_server_side_groq_api_key
 GROQ_MODEL=openai/gpt-oss-120b
 GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
+CLOUD_REQUEST_TIMEOUT_MS=20000
 ```
 
-The server defaults to Groq's OpenAI-compatible endpoint and GPT-OSS 120B, with GPT-OSS 20B as a fallback. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
+The server defaults to Groq's OpenAI-compatible endpoint and tries GPT-OSS 120B, then GPT-OSS 20B. A failed network connection skips the remaining cloud models. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server. The older Llama 3.3 70B and Llama 3.1 8B IDs can still be configured for enterprise accounts that retain access.
+
+The API binds to `127.0.0.1` by default. For a phone on your trusted development LAN, set `HOST=0.0.0.0` and use the computer's LAN address in `client/.env`; avoid exposing that development server to public networks.
 
 ### 3. Configure the client
 
@@ -323,7 +327,7 @@ python -m pip install -r backend/requirements.txt
 cp .env.example .env
 ```
 
-Set the Python fallback's provider key in the root `.env`, then start all three services with `npm run dev:with-python-fallback`. You can also run `npm run dev:python-fallback` separately. Set `VITE_PYTHON_FALLBACK_URL` in `client/.env` if the Python service is not at `http://127.0.0.1:8000`. This Python router has its own provider configuration and does not replace the Express server's primary Groq configuration.
+Set the Python fallback's provider key in the root `.env`, then start all three services with `npm run dev:with-python-fallback`. You can also run `npm run dev:python-fallback` separately. Set `VITE_PYTHON_FALLBACK_URL` in `client/.env` if the Python service is not at `http://127.0.0.1:8000`. This Python router has its own provider configuration and does not replace the Express server's primary Groq configuration. The optional `apps/desktop` Electron shell can start the Python process itself when launched with `SHANAYA_ENABLE_PYTHON_FALLBACK=true`; install `backend/requirements.txt` in the selected system Python environment first. Its child uses fixed arguments, a restricted environment, no shell, and no renderer process API.
 
 ## Configuration
 
@@ -348,6 +352,7 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `PORT` | No | `3001` | Express API port. |
+| `HOST` | No | `127.0.0.1` | API bind address; `0.0.0.0` enables LAN access. |
 | `CLIENT_ORIGIN` | No | Local origins | Comma-separated CORS allowlist. |
 | `MCP_ENABLED` | No | `false` | Set to `true` to mount the remote `/mcp` Streamable HTTP endpoint. |
 | `MCP_API_TOKEN` | Required when remote MCP is enabled | — | Random bearer token of at least 32 characters. Never place it in client code. |
@@ -356,6 +361,7 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `GROQ_API_URL` | No | Groq chat completions endpoint | Optional Groq-compatible endpoint override. `CLOUD_API_URL` can select another compatible provider. |
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Primary cloud model. |
 | `GROQ_MODEL_FALLBACKS` | No | `openai/gpt-oss-20b` | Comma-separated fallback models, also shown in the app's model selector. |
+| `CLOUD_REQUEST_TIMEOUT_MS` | No | `20000` | Per-model cloud request timeout, bounded to 3–120 seconds. |
 | `CLOUD_API_URL` | No | Groq endpoint | OpenAI-compatible `/chat/completions` endpoint for an alternate provider. |
 | `CLOUD_API_KEY` | No | — | Server-side key for an alternate provider; never expose it in a `VITE_*` variable. |
 | `CLOUD_MODEL_FALLBACKS` | No | — | Legacy-compatible comma-separated model list for an alternate provider. |
@@ -533,9 +539,9 @@ npm run cap:run:android --prefix client
 npm run cap:run:electron --prefix client
 ```
 
-The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` after Capacitor synchronization. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves. It also aligns the `@pinecall/ionic` Java and Kotlin JVM targets to Java 17, preventing Gradle's inconsistent-target failure. It only changes generated dependency files under `client/node_modules`.
+The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` after Capacitor synchronization. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves, aligns the `@pinecall/ionic` Java and Kotlin JVM targets to Java 17, and adds the microphone permission to the generated app manifest.
 
-The iOS workflow runs `npm run cap:patch:ios --prefix client` before generating the native project. This adds the system zlib linker flag required by the prebuilt native-agent FFI library, whose libgit2 symbols depend on `libz`.
+The iOS workflow runs `npm run cap:patch:ios --prefix client` after Capacitor synchronization. It adds the system zlib linker flag required by the prebuilt native-agent FFI library and microphone/speech usage descriptions required by native voice input.
 
 For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS API URL or the development computer's LAN IP in `VITE_API_BASE_URL`.
 
@@ -570,7 +576,7 @@ To export a signed iOS IPA, configure the repository variable `IOS_SIGNING_ENABL
 The GitHub Actions workflow in [`.github/workflows/build.yml`](./.github/workflows/build.yml) uses Node 24 and builds the client on every pull request, push to `main`, version tag, and manual dispatch.
 
 - **Web/PWA:** installs with lifecycle scripts disabled, generates the Draco avatar, and uploads `shanaya-web-pwa`.
-- **Electron:** generates the Capacitor Electron project, vendors runtime plugins, and ignores invalid directory-valued certificate settings so unsigned builds can still complete when signing secrets are absent.
+- **Electron:** generates the Capacitor Electron project, vendors runtime plugins, ignores invalid directory-valued certificate settings, and disables automatic Snap Store publishing. Tagged builds publish the generated installers through the dedicated GitHub Release job instead.
 - **Android:** installs SDK 36, NDK 29, and CMake 3.22.1; applies the Kotlin Gradle patch after Capacitor generates the native project; uploads debug or signed release APKs.
 - **iOS:** applies the native-agent zlib linker patch before project generation, adds privacy and speech permission metadata, archives the generated Xcode project/workspace, and exports an IPA when Apple signing is configured.
 - **Releases:** on `v*` tags, gathers the Android, iOS, macOS, Windows, and Linux outputs and attaches their install packages to a GitHub Release. The release job has `contents: write` permission; other build jobs remain read-only.
@@ -657,6 +663,7 @@ To deploy:
    GROQ_API_KEY=replace_me
    GROQ_MODEL=openai/gpt-oss-120b
    GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
+   CLOUD_REQUEST_TIMEOUT_MS=20000
    ```
 
 4. Start the server:

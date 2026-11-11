@@ -1,10 +1,13 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const net = require("node:net");
 const { createServer } = require("node:http");
 const path = require("node:path");
 
 let mainWindow;
 let frontendServer;
+let pythonBackend;
 
 const webRoot = app.isPackaged
   ? path.join(process.resourcesPath, "frontend", "dist")
@@ -21,6 +24,74 @@ const mimeTypes = {
   ".wasm": "application/wasm",
   ".woff2": "font/woff2",
 };
+
+function isPythonApiAlreadyRunning() {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port: 8000 });
+    const finish = (available) => {
+      socket.destroy();
+      resolve(available);
+    };
+    socket.setTimeout(300, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+function startPythonFallback() {
+  if (process.env.SHANAYA_ENABLE_PYTHON_FALLBACK !== "true") return Promise.resolve();
+  return isPythonApiAlreadyRunning().then((alreadyRunning) => {
+    // If another local fallback already owns the port, leave it alone.
+    if (alreadyRunning || pythonBackend || process.env.SHANAYA_SKIP_PYTHON_SPAWN === "true") return;
+    const packagedRoot = process.resourcesPath;
+    const projectRoot = path.resolve(__dirname, "../..");
+    const backendRoot = app.isPackaged ? packagedRoot : projectRoot;
+    const python = process.env.SHANAYA_PYTHON_EXECUTABLE || (process.platform === "win32" ? "python" : "python3");
+    const envAllowlist = [
+      "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "COMSPEC", "PATHEXT", "TMP", "TEMP", "LANG",
+      "GROQ_API_KEY", "GROQ_MODELS", "OPENAI_API_KEY", "OPENAI_MODELS", "ANTHROPIC_API_KEY", "ANTHROPIC_MODELS",
+      "GEMINI_API_KEY", "GEMINI_MODELS", "LLAMA_CPP_MODEL_PATH", "LLAMA_CPP_N_CTX", "LLAMA_CPP_N_THREADS",
+      "LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY", "MITHI_TTS_URL", "MITHI_TTS_API_KEY",
+    ];
+    const childEnv = Object.fromEntries(envAllowlist
+      .filter((name) => process.env[name] !== undefined)
+      .map((name) => [name, process.env[name]]));
+    childEnv.SHANAYA_HOST = "127.0.0.1";
+    childEnv.SHANAYA_PORT = "8000";
+    childEnv.SHANAYA_WORKSPACE = path.join(app.getPath("userData"), "workspace");
+
+    try {
+      // Fixed module and arguments, shell disabled, and no process APIs exposed to the renderer.
+      pythonBackend = spawn(python, ["-m", "backend.main"], {
+        cwd: backendRoot,
+        env: childEnv,
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      pythonBackend.once("error", (error) => {
+        pythonBackend = undefined;
+        console.warn(`Python fallback did not start (${error.code || error.name || "process error"}).`);
+      });
+      pythonBackend.once("exit", (code) => {
+        pythonBackend = undefined;
+        if (code && code !== 0) console.warn(`Python fallback stopped with exit code ${code}.`);
+      });
+    } catch (error) {
+      console.warn(`Python fallback did not start (${error.code || error.name || "process error"}).`);
+    }
+  }).catch((error) => {
+    console.warn(`Python fallback availability could not be checked (${error?.code || error?.name || "startup error"}).`);
+  });
+}
+
+function isTrustedMainFrame(event) {
+  return Boolean(
+    mainWindow
+    && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame,
+  );
+}
 
 function startFrontendServer() {
   if (frontendServer?.listening) return Promise.resolve("http://localhost:5173");
@@ -131,7 +202,8 @@ async function createWindow() {
   void mainWindow.loadURL(frontendUrl);
 }
 
-ipcMain.handle("shanaya:confirm", async (_event, message) => {
+ipcMain.handle("shanaya:confirm", async (event, message) => {
+  if (!isTrustedMainFrame(event)) return false;
   if (typeof message !== "string" || message.length > 2000) return false;
   const { response } = await require("electron").dialog.showMessageBox(mainWindow, {
     type: "warning",
@@ -145,10 +217,19 @@ ipcMain.handle("shanaya:confirm", async (_event, message) => {
 });
 
 app.whenReady().then(async () => {
+  await startPythonFallback();
   await createWindow();
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow();
   });
+}).catch((error) => {
+  // Backend optional startup must not prevent the desktop shell opening.
+  console.error(`Shanaya desktop window could not start (${error?.code || error?.name || "startup error"}).`);
+  app.quit();
+});
+
+app.on("before-quit", () => {
+  if (pythonBackend && !pythonBackend.killed) pythonBackend.kill("SIGTERM");
 });
 
 app.on("window-all-closed", () => {

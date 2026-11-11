@@ -58,10 +58,17 @@ async function requestAgentStep(url: string, body: Record<string, unknown>): Pro
     });
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    let endpointLabel = "the configured server";
+    try {
+      const target = new URL(url, window.location.href);
+      endpointLabel = `${target.origin}${target.pathname}`;
+    } catch {
+      // Do not echo malformed URLs or query parameters into the chat error.
+    }
     throw new AgentApiError(
       timedOut
         ? "The AI request timed out while waiting for the API server. Check the server terminal and Groq model access."
-        : `Could not reach the AI API at ${url}. Start the server with npm run dev from the project root.`,
+        : `Could not reach the AI API at ${endpointLabel}. Start the server with npm run dev from the project root.`,
       timedOut ? 408 : undefined,
     );
   }
@@ -79,15 +86,38 @@ function shouldUsePythonFallback(error: unknown) {
   return error.status === undefined || error.status === 404 || error.status === 408 || error.status === 429 || (error.status ?? 0) >= 500;
 }
 
+export function shouldUseLocalFallback(error: unknown) {
+  return shouldUsePythonFallback(error);
+}
+
 function parsePromptToolCalls(content: string): unknown[] {
-  const candidate = content.match(/\{[\s\S]*\}/)?.[0];
-  if (!candidate) return [];
-  try {
-    const parsed = JSON.parse(candidate);
-    return Array.isArray(parsed?.toolCalls) ? parsed.toolCalls : [];
-  } catch {
-    return [];
+  const text = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}" && --depth === 0) {
+        try {
+          const parsed = JSON.parse(text.slice(start, index + 1));
+          return Array.isArray(parsed?.toolCalls) ? parsed.toolCalls : [];
+        } catch {
+          break;
+        }
+      }
+    }
   }
+  return [];
 }
 
 export class LLMRouter {
@@ -113,7 +143,9 @@ export class LLMRouter {
       } catch (fallbackError) {
         const primaryMessage = primaryError instanceof Error ? primaryError.message : "The primary Node API failed.";
         const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "The Python fallback API failed.";
-        throw new Error(`${primaryMessage} Python fallback: ${fallbackMessage}`);
+        const retryable = shouldUseLocalFallback(primaryError) || shouldUseLocalFallback(fallbackError);
+        const status = retryable ? 503 : fallbackError instanceof AgentApiError ? fallbackError.status : undefined;
+        throw new AgentApiError(`${primaryMessage} Python fallback: ${fallbackMessage}`, status);
       }
     }
   }

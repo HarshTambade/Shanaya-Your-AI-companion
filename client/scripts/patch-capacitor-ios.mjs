@@ -30,5 +30,26 @@ function patchPodspec(relativePath) {
   console.log(`Patched iOS zlib library setting: ${relativePath}`);
 }
 
+function ensureUsageDescriptions() {
+  const filePath = resolve(clientRoot, "ios/App/App/Info.plist");
+  if (!existsSync(filePath)) return;
+
+  let source = readFileSync(filePath, "utf8");
+  const additions = [];
+  if (!source.includes("<key>NSMicrophoneUsageDescription</key>")) {
+    additions.push("    <key>NSMicrophoneUsageDescription</key>\n    <string>Shanaya uses the microphone so you can speak with your companion.</string>");
+  }
+  if (!source.includes("<key>NSSpeechRecognitionUsageDescription</key>")) {
+    additions.push("    <key>NSSpeechRecognitionUsageDescription</key>\n    <string>Shanaya uses speech recognition to turn your voice into a message.</string>");
+  }
+  if (!additions.length) return;
+  const rootDictionaryEnd = source.lastIndexOf("</dict>");
+  if (rootDictionaryEnd < 0) throw new Error("Could not find the Info.plist dictionary end tag.");
+  source = `${source.slice(0, rootDictionaryEnd)}${additions.join("\n")}\n${source.slice(rootDictionaryEnd)}`;
+  writeFileSync(filePath, source);
+  console.log("Added microphone and speech recognition usage descriptions to iOS Info.plist.");
+}
+
 patchSwiftPackage("node_modules/capacitor-native-agent/Package.swift");
 patchPodspec("node_modules/capacitor-native-agent/CapacitorNativeAgent.podspec");
+ensureUsageDescriptions();

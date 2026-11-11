@@ -1,8 +1,8 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { AnimationClip, Box3, Group, MathUtils, Mesh, PerspectiveCamera, Vector3 } from "three";
-import { DRACOLoader } from "three-stdlib";
+import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
+import { DRACOLoader, SkeletonUtils } from "three-stdlib";
 import type { Emotion } from "../types";
 
 const emotionMorphs: Record<Emotion, string[]> = {
@@ -53,22 +53,64 @@ function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   });
 }
 
+function cloneAvatarResources(scene: Group) {
+  // useGLTF caches its scene globally. Give the mounted instance independent
+  // GPU resources; cleanup can then dispose these without touching that cache.
+  const geometries = new Map<BufferGeometry, BufferGeometry>();
+  const materials = new Set<Material>();
+  const textures = new Map<Texture, Texture>();
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    const geometry = geometries.get(object.geometry) ?? object.geometry.clone();
+    geometries.set(object.geometry, geometry);
+    object.geometry = geometry;
+
+    const cloneMaterial = (material: Material) => {
+      const clone = material.clone();
+      materials.add(clone);
+      for (const [key, value] of Object.entries(clone as unknown as Record<string, unknown>)) {
+        if (!(value instanceof Texture)) continue;
+        let texture = textures.get(value);
+        if (!texture) {
+          texture = value.clone();
+          texture.needsUpdate = true;
+          textures.set(value, texture);
+        }
+        (clone as unknown as Record<string, unknown>)[key] = texture;
+      }
+      return clone;
+    };
+    object.material = Array.isArray(object.material)
+      ? object.material.map(cloneMaterial)
+      : cloneMaterial(object.material);
+  });
+
+  return {
+    dispose() {
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      textures.forEach((texture) => texture.dispose());
+    },
+  };
+}
+
 function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void }) {
   const { scene, animations } = useGLTF(avatarModelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
+  // Keep the render-time clone CPU-only; clone GPU resources in the effect so
+  // StrictMode's intentional double render cannot leak discarded resources.
+  const avatar = useMemo(() => SkeletonUtils.clone(scene) as Group, [scene]);
   const group = useRef<Group>(null);
   const model = useRef<Group>(null);
   const modelScaleInitialized = useRef(false);
   const emotionPulse = useRef(0);
   const stableAnimations = useMemo(() => animations.map((animation) => {
-    // This avatar's Idle clip animates the face and its outline as full-mesh
-    // morphs. That deformation makes the facial features disappear at some keys.
-    // Keep the clothing, hair, and body animation while holding the face pose.
+    // The GLB's Idle clip animates all three face morph meshes plus the eye,
+    // head, and neck tracks. Those keys make the facial features disappear at
+    // some frames, so keep the body/hair/clothing motion and hold the face still.
     const tracks = animation.tracks.filter(({ name }) => {
       const trackName = name.toLowerCase();
-      return trackName !== "head_09.quaternion"
-        && trackName !== "neck_08.quaternion"
-        && trackName !== "object_123.morphtargetinfluences"
-        && trackName !== "object_124.morphtargetinfluences";
+      return !trackName.includes("morphtargetinfluences")
+        && !/^(head_09|neck_08|eye_l_018|eye_r_019)\./.test(trackName);
     });
     return tracks.length === animation.tracks.length
       ? animation
@@ -78,12 +120,16 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
   const { camera, size } = useThree();
 
   useEffect(() => {
-    applyEmotionMorph(scene, emotion);
+    applyEmotionMorph(avatar, emotion);
     emotionPulse.current = 0;
-  }, [emotion, scene]);
+  }, [emotion, avatar]);
+
+  useEffect(() => {
+    return cloneAvatarResources(avatar).dispose;
+  }, [avatar]);
 
   const framing = useMemo(() => {
-    const bounds = new Box3().setFromObject(scene);
+    const bounds = new Box3().setFromObject(avatar);
     const modelSize = bounds.getSize(new Vector3());
     const center = bounds.getCenter(new Vector3());
     return {
@@ -91,7 +137,7 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
       sourceWidth: modelSize.x,
       position: [-center.x, -bounds.min.y, -center.z] as [number, number, number],
     };
-  }, [scene]);
+  }, [avatar]);
 
   useEffect(() => {
     const idleAnimation = stableAnimations.find((animation) => /idle|stand|breath/i.test(animation.name)) ?? stableAnimations[0];
@@ -151,7 +197,7 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
   return (
     <group ref={group}>
       <group ref={model} position={framing.position}>
-        <primitive object={scene} />
+        <primitive object={avatar} dispose={null} />
       </group>
     </group>
   );

@@ -57,3 +57,15 @@ for (const relativePath of moduleGradleFiles) {
     console.log(`Patched Android Gradle compatibility: ${relativePath}`);
   }
 }
+
+const manifestPath = resolve(projectRoot, "android/app/src/main/AndroidManifest.xml");
+if (existsSync(manifestPath)) {
+  let manifest = readFileSync(manifestPath, "utf8");
+  if (!manifest.includes("android.permission.RECORD_AUDIO")) {
+    const applicationTag = manifest.indexOf("<application");
+    if (applicationTag < 0) throw new Error("Could not find the Android application tag in AndroidManifest.xml.");
+    manifest = `${manifest.slice(0, applicationTag)}    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    ${manifest.slice(applicationTag)}`;
+    writeFileSync(manifestPath, manifest);
+    console.log("Added RECORD_AUDIO to the Android app manifest.");
+  }
+}

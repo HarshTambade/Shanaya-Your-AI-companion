@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { TalkMode } from "@elizaos/capacitor-talkmode";
 import type { TalkModeErrorEvent, TalkModeTranscriptEvent } from "@elizaos/capacitor-talkmode";
+import { requestCallMicrophonePermission } from "./callPermissions";
 import type { SpeechLanguage } from "../types";
 
 export type TranscriptListener = (text: string, isFinal: boolean) => void;
@@ -36,30 +37,57 @@ function startBrowserSession(language: SpeechLanguage, onTranscript: TranscriptL
   const recognition = new Recognition();
   let stopped = false;
   let finalTranscriptSeen = false;
+  let latestTranscript = "";
+  let errorReported = false;
+  let restartTimer: number | undefined;
+
+  const restartRecognition = () => {
+    if (stopped || errorReported) return;
+    finalTranscriptSeen = false;
+    latestTranscript = "";
+    try {
+      recognition.start();
+    } catch {
+      restartTimer = window.setTimeout(restartRecognition, 150);
+    }
+  };
+
   recognition.lang = language;
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.interimResults = true;
   recognition.onresult = (event) => {
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
       const result = event.results[index];
       const transcript = result?.[0]?.transcript?.trim();
+      if (!result.isFinal && transcript && transcript !== latestTranscript) {
+        finalTranscriptSeen = false;
+      }
       if (!transcript || (result.isFinal && finalTranscriptSeen)) continue;
+      latestTranscript = transcript;
       if (result.isFinal) finalTranscriptSeen = true;
       onTranscript(transcript, result.isFinal);
     }
   };
   recognition.onerror = ({ error }) => {
     if (error === "aborted" || stopped) return;
+    if (error === "no-speech") {
+      restartTimer = window.setTimeout(restartRecognition, 150);
+      return;
+    }
+    errorReported = true;
     onError?.(error === "not-allowed" || error === "service-not-allowed"
       ? "Allow microphone access in your browser to use speech input."
       : error === "audio-capture"
         ? "No microphone is available. Connect a microphone and try again."
-        : error === "no-speech"
-          ? "No speech was detected. Tap Speak and try again."
           : `Speech recognition failed (${error}).`);
   };
   recognition.onend = () => {
-    if (!stopped && !finalTranscriptSeen) onError?.("Speech input stopped before a transcript was received. Tap Speak to try again.");
+    if (stopped || errorReported) return;
+    if (latestTranscript && !finalTranscriptSeen) {
+      finalTranscriptSeen = true;
+      onTranscript(latestTranscript, true);
+    }
+    restartTimer = window.setTimeout(restartRecognition, 150);
   };
 
   try {
@@ -70,6 +98,7 @@ function startBrowserSession(language: SpeechLanguage, onTranscript: TranscriptL
 
   return async () => {
     stopped = true;
+    if (restartTimer !== undefined) window.clearTimeout(restartTimer);
     recognition.onresult = null;
     recognition.onerror = null;
     recognition.onend = null;
@@ -85,6 +114,12 @@ export class VoiceService {
   ) {
     if (Capacitor.getPlatform() === "web") {
       return startBrowserSession(language, onTranscript, onError);
+    }
+
+    // Ask through the native permission API before creating a TalkMode session;
+    // its own start method also guards the mic in case platform state changes.
+    if (!(await requestCallMicrophonePermission())) {
+      throw new Error("Microphone access was denied. Enable it in your device settings to use voice input.");
     }
 
     let finalTranscriptSeen = false;

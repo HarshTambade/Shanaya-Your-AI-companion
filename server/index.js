@@ -5,6 +5,7 @@ const express = require("express");
 
 const app = express();
 const port = Number(process.env.PORT) || 3001;
+const host = process.env.HOST?.trim() || "127.0.0.1";
 const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capacitor://localhost,http://localhost,https://localhost")
   .split(",")
   .map((origin) => origin.trim())
@@ -24,6 +25,7 @@ const corsOrigin = (origin, callback) => {
 const defaultGroqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 const cloudApiUrl = process.env.GROQ_API_URL || process.env.CLOUD_API_URL || defaultGroqApiUrl;
 const isGroqProvider = cloudApiUrl.startsWith("https://api.groq.com/");
+const defaultGroqModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
 const cloudApiKey = isGroqProvider
   ? process.env.GROQ_API_KEY || process.env.CLOUD_API_KEY
   : process.env.CLOUD_API_KEY || process.env.GROQ_API_KEY;
@@ -43,13 +45,16 @@ const configuredFallbacks = (
   .split(",")
   .map((model) => model.trim())
   .filter(Boolean);
-const primaryCloudModel = configuredPrimaryModels.shift() || configuredFallbacks.shift() || (isGroqProvider ? "openai/gpt-oss-120b" : "");
+const primaryCloudModel = configuredPrimaryModels[0] || configuredFallbacks[0] || (isGroqProvider ? defaultGroqModels[0] : "");
+const fallbackCloudModels = configuredFallbacks.length
+  ? configuredFallbacks
+  : isGroqProvider ? defaultGroqModels.filter((model) => model !== primaryCloudModel) : [];
 const cloudModels = [...new Set([
   primaryCloudModel,
-  ...configuredPrimaryModels,
-  ...configuredFallbacks,
-  ...(isGroqProvider && !process.env.GROQ_MODEL_FALLBACKS && !process.env.CLOUD_MODEL_FALLBACKS ? ["openai/gpt-oss-20b"] : []),
+  ...configuredPrimaryModels.slice(1),
+  ...fallbackCloudModels,
 ].filter(Boolean))];
+const cloudRequestTimeout = Math.max(3_000, Math.min(120_000, Number(process.env.CLOUD_REQUEST_TIMEOUT_MS) || 20_000));
 const cloudProvider = isGroqProvider ? "Groq" : "Custom";
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "gurubot/self-after-dark:latest";
@@ -101,22 +106,54 @@ app.get("/api/pinecall/token", async (_req, res) => {
     }
     return res.json({ token: token.token, server: token.server, expires_in: token.expires_in ?? token.expiresIn });
   } catch (error) {
-    console.error("Pinecall token issuer request failed:", error.message);
+    console.error(`Pinecall token issuer request failed (${error?.name || "request error"}).`);
     return res.status(502).json({ error: "Could not get a call token. Check the Pinecall token issuer configuration." });
   }
 });
 
-function parseAssistantOutput(content) {
-  const candidate = content.match(/\{[\s\S]*\}/)?.[0] || content;
-  try {
-    const parsed = JSON.parse(candidate);
-    const reply = typeof parsed.reply === "string" ? parsed.reply.trim() : "";
-    const emotion = allowedEmotions.has(parsed.emotion) ? parsed.emotion : "neutral";
-    if (reply) return { reply, emotion };
-  } catch {
-    // Fall back to plain text if a local model does not follow the JSON instruction.
+function parseJsonObject(content) {
+  const candidate = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  for (let start = 0; start < candidate.length; start += 1) {
+    if (candidate[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < candidate.length; index += 1) {
+      const character = candidate[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}" && --depth === 0) {
+        try {
+          const parsed = JSON.parse(candidate.slice(start, index + 1));
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+        } catch {
+          break;
+        }
+      }
+    }
   }
-  return { reply: content.trim(), emotion: "neutral" };
+  return null;
+}
+
+function parseAssistantOutput(content) {
+  const parsed = parseJsonObject(content);
+  const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : "";
+  const emotion = allowedEmotions.has(parsed?.emotion) ? parsed.emotion : "neutral";
+  if (reply) return { reply, emotion };
+  return { reply: content.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""), emotion: "neutral" };
+}
+
+function isNetworkFailure(error) {
+  const code = error && typeof error === "object" ? error.code : undefined;
+  return error instanceof TypeError
+    || ["AbortError", "TimeoutError"].includes(error?.name)
+    || ["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EAI_AGAIN", "ETIMEDOUT"].includes(code);
 }
 
 async function requestCloud(messages, models = cloudModels) {
@@ -138,16 +175,25 @@ async function requestCloud(messages, models = cloudModels) {
           temperature: 0.7,
           max_completion_tokens: 700,
         }),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(cloudRequestTimeout),
       });
       const completion = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+      if (!response.ok) {
+        const error = new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+        error.status = response.status;
+        throw error;
+      }
       const content = completion.choices?.[0]?.message?.content?.trim();
       if (content) return parseAssistantOutput(content);
       lastError = new Error(`${model} returned an empty response.`);
     } catch (error) {
       lastError = error;
-      console.warn(`Cloud model ${model} failed; trying the next configured model.`);
+      if (isNetworkFailure(error)) {
+        console.warn(`Cloud model ${model} could not reach its provider; skipping the remaining cloud models.`);
+        break;
+      }
+      if (error.status === 429) console.warn(`Cloud model ${model} was rate limited; trying the next configured model.`);
+      else console.warn(`Cloud model ${model} failed; trying the next configured model.`);
     }
   }
   throw lastError || new Error("No cloud models are configured.");
@@ -215,16 +261,25 @@ async function requestCloudAgent(messages, tools, models = cloudModels) {
           temperature: 0.4,
           max_completion_tokens: 900,
         }),
-        signal: AbortSignal.timeout(120_000),
+        signal: AbortSignal.timeout(cloudRequestTimeout),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+      if (!response.ok) {
+        const error = new Error(`Cloud endpoint returned HTTP ${response.status}.`);
+        error.status = response.status;
+        throw error;
+      }
       const message = data.choices?.[0]?.message;
       if (message && (typeof message.content === "string" || Array.isArray(message.tool_calls))) return message;
       lastError = new Error(`${model} returned neither a reply nor a tool request.`);
     } catch (error) {
       lastError = error;
-      console.warn(`Cloud agent model ${model} failed; trying the next configured model.`);
+      if (isNetworkFailure(error)) {
+        console.warn(`Cloud agent model ${model} could not reach its provider; skipping the remaining cloud models.`);
+        break;
+      }
+      if (error.status === 429) console.warn(`Cloud agent model ${model} was rate limited; trying the next configured model.`);
+      else console.warn(`Cloud agent model ${model} failed; trying the next configured model.`);
     }
   }
   throw lastError || new Error("No cloud agent models are configured.");
@@ -274,7 +329,7 @@ app.post("/api/agent", async (req, res) => {
       : await requestCloudAgent(normalizedMessages, tools, selectedModels);
     return res.json({ message: { content: typeof message.content === "string" ? message.content : "", tool_calls: Array.isArray(message.tool_calls) ? message.tool_calls : [] } });
   } catch (error) {
-    console.error(`${mode} agent request failed:`, error.message);
+    console.error(`${mode} agent request failed (${error?.name || "request error"}).`);
     const missingCloudSettings = mode === "cloud" && (!cloudApiKey || cloudModels.length === 0);
     return res.status(missingCloudSettings ? 503 : 502).json({
       error: mode === "ollama"
@@ -307,7 +362,7 @@ app.post("/api/tts", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     return res.send(audio);
   } catch (error) {
-    console.error("Mithi TTS request failed:", error.message);
+    console.error(`Mithi TTS request failed (${error?.name || "request error"}).`);
     return res.status(502).json({ error: "Could not reach the configured Mithi TTS service." });
   }
 });
@@ -333,7 +388,7 @@ app.post("/api/desktop/computer", async (req, res) => {
     });
     return res.json({ content: result.content, stop_reason: result.stop_reason });
   } catch (error) {
-    console.error("Desktop computer agent request failed:", error.message);
+    console.error(`Desktop computer agent request failed (${error?.name || "request error"}).`);
     return res.status(502).json({ error: "The desktop agent could not complete the Anthropic request." });
   }
 });
@@ -373,7 +428,7 @@ app.post("/api/chat", async (req, res) => {
     if (!result.reply) return res.status(502).json({ error: "The AI returned an empty response. Please try again." });
     return res.json(result);
   } catch (error) {
-    console.error(`${mode} chat request failed:`, error.message);
+    console.error(`${mode} chat request failed (${error?.name || "request error"}).`);
     const message = mode === "ollama"
       ? "Could not reach your Ollama server. Check that it is running and that OLLAMA_BASE_URL is correct."
       : "Cloud AI could not respond using the configured model fallback chain. Check the API key and model access.";
@@ -388,22 +443,29 @@ async function startServer() {
     mountShanayaMcpEndpoint(app, process.env.MCP_API_TOKEN);
   }
 
-  const server = app.listen(port, () => {
-    console.log(`Shanaya API listening on http://localhost:${port}`);
-    if (mcpEnabled) console.log(`Shanaya MCP endpoint enabled at http://localhost:${port}/mcp`);
+  const server = app.listen(port, host, () => {
+    console.log(`Shanaya API listening on http://${host}:${port}`);
+    if (mcpEnabled) console.log(`Shanaya MCP endpoint enabled at http://${host}:${port}/mcp`);
   });
 
   server.on("error", (error) => {
     if (error.code === "EADDRINUSE") {
       console.error(`Shanaya API could not start: port ${port} is already in use. Stop the existing process or set PORT to another value.`);
     } else {
-      console.error("Shanaya API could not start:", error);
+      console.error(`Shanaya API could not start (${error.code || error.name || "startup error"}).`);
     }
     process.exitCode = 1;
   });
 }
 
-startServer().catch((error) => {
-  console.error("Shanaya API could not start:", error);
-  process.exitCode = 1;
-});
+// Export the Express app for serverless adapters while preserving direct startup
+// when this file is launched with Node from the desktop/dev scripts.
+Object.assign(app, { cloudModels, parseAssistantOutput, requestCloud, requestCloudAgent, startServer });
+module.exports = app;
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error(`Shanaya API could not start (${error?.code || error?.name || "startup error"}).`);
+    process.exitCode = 1;
+  });
+}

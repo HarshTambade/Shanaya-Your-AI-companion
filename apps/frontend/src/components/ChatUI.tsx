@@ -133,7 +133,7 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
       const saved = window.localStorage.getItem("shanaya.model");
       setSelectedModel(options.some((item) => item.model === saved) ? saved! : result.defaultModel || options[0]?.model || "");
     }).catch(() => {
-      if (mounted) setCatalog({ provider: "Groq", defaultModel: "llama-3.3-70b-versatile", tiers: { groq: [], secondary: [], local: [] } });
+      if (mounted) setCatalog({ provider: "Groq", defaultModel: "openai/gpt-oss-120b", tiers: { groq: [], secondary: [], local: [] } });
     });
     return () => { mounted = false; };
   }, []);
@@ -162,8 +162,8 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
       setFallbackRequested(true);
       await waitForBrowserModel();
     }
-    const promptMessages = messages
-      .filter((message) => message.role === "user" || message.role === "assistant")
+    const promptMessages: Array<{ role: "user" | "assistant"; content: string }> = messages
+      .filter((message): message is ChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
       .slice(-10)
       .map(({ role, content }) => ({ role, content }));
     const raw = await localLLM.generate([
@@ -213,7 +213,7 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
       setNativeModelStatus("available");
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : "Could not download the native model.");
-      setNativeModelStatus(await getNativeModelStatus().catch(() => "unavailable"));
+      setNativeModelStatus(await getNativeModelStatus().catch(() => "unavailable" as const));
     } finally {
       setIsPreparingNativeModel(false);
     }
