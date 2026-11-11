@@ -235,9 +235,9 @@ function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMot
     const viewHeight = 2 * 5.4 * Math.tan((perspectiveCamera.fov * Math.PI) / 360);
     const aspect = size.width / Math.max(1, size.height);
     const viewWidth = viewHeight * aspect;
-    // The canvas sits between the avatar header and status cards, so let the model
-    // use most of that available area while preserving a small safety margin.
-    const heightFraction = Math.min(0.92, 980 / Math.max(1, size.height));
+    // Leave a generous margin: skinned hair, clothing, and idle motion can extend
+    // beyond the static pose bounds, so fitting right to the edge clips the model.
+    const heightFraction = 0.76;
     const heightLimit = viewHeight * heightFraction;
     const widthLimit = viewWidth * 0.78 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
     const fitScale = Math.min(heightLimit, widthLimit) / Math.max(framing.sourceHeight, 0.001);
