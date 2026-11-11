@@ -239,41 +239,9 @@ Provider behavior is outside this repository's control. Before production use, r
 
 ## Quick start
 
-### Python Edition (the default root workspace)
+### Primary client and server
 
-This edition lives in `backend/`, `ebpf/`, and `apps/`. It uses the Python FastAPI agent, an in-process MCP tool host, the React Three Fiber frontend, and a Groq-first model router. Python 3.11+ is required by the MCP SDK.
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r backend/requirements.txt
-cp .env.example .env
-npm install
-```
-
-Add your server-side `GROQ_API_KEY` to `.env`, then run:
-
-```bash
-npm run dev
-```
-
-The frontend runs on Vite and the API runs on port 8000 by default. `npm run build` builds the Python Edition frontend. Set `SHANAYA_HOST`, `SHANAYA_PORT`, `SHANAYA_CORS_ORIGINS`, and `VITE_API_BASE_URL` in `.env` when the API or frontend is hosted elsewhere. For a packaged mobile app, set `VITE_API_BASE_URL` to the reachable API address; `localhost` on a phone points to the phone itself.
-
-The requested Groq order is preserved in `.env.example`. Groq lists `llama-3.3-70b-versatile` and `llama-3.1-8b-instant` as retired for free and developer tiers, so those candidates can fail before the router reaches `openai/gpt-oss-120b`. Replace the `GROQ_MODELS` value with model IDs enabled for your account when needed ([Groq deprecation schedule](https://console.groq.com/docs/deprecations)). The configured secondary defaults are `gpt-4o`, `claude-sonnet-5`, and `gemini-3.8-flash`; provider model availability can change.
-
-Destructive tools (`write_file` and `execute_shell`) return a confirmation request and execute only after an explicit approval. `read_file` is workspace-confined. The eBPF loader is Linux-only and needs root, kernel headers, and the OS-provided BCC bindings. On Debian/Ubuntu, install `bpfcc-tools`, `python3-bpfcc`, and `linux-headers-$(uname -r)` first ([BCC install guide](https://github.com/iovisor/bcc/blob/master/INSTALL.md)). Then run:
-
-```bash
-sudo python3 ebpf/loader.py
-```
-
-The loader uses `SHANAYA_SENSES_URL` from its process environment or the local default. The pip package named `bcc` is not the Linux BPF Compiler Collection, so BCC is not installed by `backend/requirements.txt`.
-
-For Electron development, run `npm run dev:desktop`; the Python API, Vite frontend, and desktop shell start together. For iOS/Android, build the frontend and sync the corresponding Capacitor project from `@shanaya/mobile`. Native offline inference requires a compatible GGUF URL in `VITE_OFFLINE_MODEL_URL` before the app build. Before packaging Electron, run `npm run build`, then `npm run package --workspace @shanaya/desktop`. Packaged desktop builds serve the frontend from `http://localhost:5173`; the Python API must run separately or be hosted at the configured API URL. The Electron package does not bundle a Python interpreter or backend environment. Desktop packaging scripts are in `@shanaya/desktop`.
-
-### Existing Node/Express Edition
-
-The original `client/` and `server/` app remains available through `npm run dev:legacy` and `npm run build:legacy`.
+The root app uses the React/Vite client in `client/` and the Express API in `server/`. Cloud requests go to Express, which keeps provider keys on the server. Groq is the default cloud provider; other inference modes remain user-selectable.
 
 ### 1. Install dependencies
 
@@ -299,7 +267,7 @@ GROQ_MODEL=openai/gpt-oss-120b
 GROQ_MODEL_FALLBACKS=openai/gpt-oss-20b
 ```
 
-The server defaults to Groq's OpenAI-compatible endpoint and GPT-OSS 120B, with GPT-OSS 20B as a fallback. You can choose any configured cloud model in the app's inference settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
+The server defaults to Groq's OpenAI-compatible endpoint and GPT-OSS 120B, with GPT-OSS 20B as a fallback. You can choose another configured cloud model or inference mode in the app's settings. The server-side key must never be placed in `client/.env` or exposed through a `VITE_*` variable. To use another OpenAI-compatible provider, set `CLOUD_API_URL`, `CLOUD_API_KEY`, and `CLOUD_MODEL_FALLBACKS` on the server.
 
 ### 3. Configure the client
 
@@ -341,6 +309,19 @@ curl http://localhost:3001/api/health
 {"status":"ok"}
 ```
 
+### Optional Python model-step fallback
+
+The FastAPI service in `backend/` is optional. If enabled, the client first calls Express as usual and contacts Python only when the Express agent request fails due to a network error, missing endpoint, rate limit, timeout, or server error. Python returns one model step; the client remains responsible for tool validation, device actions, and user confirmations.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+cp .env.example .env
+```
+
+Set the Python fallback's provider key in the root `.env`, then start all three services with `npm run dev:with-python-fallback`. You can also run `npm run dev:python-fallback` separately. Set `VITE_PYTHON_FALLBACK_URL` in `client/.env` if the Python service is not at `http://127.0.0.1:8000`. This Python router has its own provider configuration and does not replace the Express server's primary Groq configuration.
+
 ## Configuration
 
 ### Client environment: `client/.env`
@@ -348,6 +329,7 @@ curl http://localhost:3001/api/health
 | Variable | Required | Description |
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | Only for a separate API origin | Base URL for `/api/chat` and `/api/pinecall/token`. Leave empty when using the Vite proxy. |
+| `VITE_PYTHON_FALLBACK_URL` | No | Optional FastAPI standby URL for agent model steps; Express remains primary. |
 | `VITE_PINECALL_AGENT_ID` | Only for Pinecall | Public Pinecall agent slug. |
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
 | `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default avatar is `/models/avatar.glb`. |
@@ -555,7 +537,7 @@ npm run preview --prefix client
 
 ### Avatar optimization
 
-The Draco pipeline compresses the avatar mesh and copies local decoder assets. The Python Edition loads this compressed model by default:
+The Draco pipeline compresses the avatar mesh and copies local decoder assets. The optional Python frontend loads this compressed model by default:
 
 ```bash
 npm run models:draco --prefix client

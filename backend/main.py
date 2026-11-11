@@ -33,6 +33,12 @@ SYSTEM_PROMPT = " ".join([
     "The backend will pause destructive tools for explicit user confirmation; never claim an action succeeded before its tool result confirms it.",
     'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|cute|neutral"}.',
 ])
+CLIENT_FALLBACK_SYSTEM_PROMPT = " ".join([
+    "You are Shanaya, a cute, calm, intelligent personal companion.",
+    "Be warm, concise, and useful. Protect the user's privacy.",
+    "Use the provided function tools when needed; request one tool at a time and never claim a tool succeeded before its result arrives.",
+    'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|neutral"}.',
+])
 MAX_AGENT_ROUNDS = 8
 MAX_TOOL_OUTPUT_CHARS = 24_000
 APPROVAL_TTL_SECONDS = max(30, int(os.getenv("APPROVAL_TTL_SECONDS", "180")))
@@ -365,6 +371,14 @@ class AgentRequest(BaseModel):
     model: str | None = None
 
 
+class AgentStepRequest(BaseModel):
+    """One model step for the client-side agent runtime; tools stay in the client."""
+
+    messages: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+    tools: list[dict[str, Any]] = Field(default_factory=list, max_length=32)
+    model: str | None = None
+
+
 class ApprovalRequest(BaseModel):
     approved: bool
 
@@ -401,6 +415,52 @@ async def chat(payload: AgentRequest) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     reply, emotion = _parse_reply(response.content)
     return {"reply": reply, "emotion": emotion, "provider": response.provider, "model": response.model}
+
+
+@app.post("/api/agent/step")
+async def agent_step(payload: AgentStepRequest) -> dict[str, Any]:
+    """Return a model step for the primary Node/client agent when it is unavailable.
+
+    This endpoint never executes tools. The client validates returned calls and
+    runs its own device tools and confirmation flows as usual.
+    """
+    messages = [dict(message) for message in payload.messages]
+    for message in messages:
+        if message.get("role") not in {"system", "user", "assistant", "tool"}:
+            raise HTTPException(status_code=400, detail="Message role is invalid.")
+        if len(json.dumps(message, ensure_ascii=False)) > 32_000:
+            raise HTTPException(status_code=413, detail="A conversation message is too large.")
+
+    schemas: list[dict[str, Any]] = []
+    for tool in payload.tools:
+        if not isinstance(tool, dict):
+            raise HTTPException(status_code=400, detail="A client tool schema is invalid.")
+        function = tool.get("function")
+        if (
+            tool.get("type") != "function"
+            or not isinstance(function, dict)
+            or not isinstance(function.get("name"), str)
+            or not function["name"].strip()
+            or not isinstance(function.get("parameters"), dict)
+            or len(json.dumps(tool, ensure_ascii=False)) > 32_000
+        ):
+            raise HTTPException(status_code=400, detail="A client tool schema is invalid.")
+        schemas.append({
+            "type": "function",
+            "function": {
+                "name": function["name"],
+                "description": str(function.get("description", ""))[:2000],
+                "parameters": function["parameters"],
+            },
+        })
+
+    if not any(message.get("role") == "system" for message in messages):
+        messages.insert(0, {"role": "system", "content": CLIENT_FALLBACK_SYSTEM_PROMPT})
+    try:
+        response = await router.complete(messages, tools=schemas, preferred_model=payload.model)
+    except LLMRouterError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"message": {"content": response.content, "tool_calls": response.tool_calls}}
 
 
 @app.post("/api/agent")

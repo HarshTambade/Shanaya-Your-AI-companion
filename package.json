@@ -2,20 +2,14 @@
   "name": "shanaya-ai-companion",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "apps/frontend",
-    "apps/mobile",
-    "apps/desktop"
-  ],
   "scripts": {
-    "dev": "concurrently -k -n backend,frontend -c magenta,cyan \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "python3 -m backend.run",
-    "dev:frontend": "npm run dev --workspace @shanaya/frontend",
-    "dev:desktop": "concurrently -k -n backend,frontend,desktop -c magenta,cyan,green \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev --workspace @shanaya/desktop\"",
-    "build": "npm run build --workspace @shanaya/frontend",
+    "dev": "concurrently -k -n server,client -c magenta,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "dev:server": "npm run dev --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
     "models:draco": "npm run models:draco --prefix client",
-    "dev:legacy": "concurrently -k -n server,client -c magenta,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
-    "build:legacy": "npm run build --prefix client",
+    "dev:python-fallback": "python3 -m backend.run",
+    "dev:with-python-fallback": "concurrently -k -n server,client,python -c magenta,cyan,green \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:python-fallback\"",
     "dev:ebpf": "sudo python3 ebpf/loader.py"
   },
   "devDependencies": {
