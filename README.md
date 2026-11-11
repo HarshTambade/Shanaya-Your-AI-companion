@@ -332,7 +332,7 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `VITE_PYTHON_FALLBACK_URL` | No | Optional FastAPI standby URL for agent model steps; Express remains primary. |
 | `VITE_PINECALL_AGENT_ID` | Only for Pinecall | Public Pinecall agent slug. |
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
-| `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default avatar is `/models/avatar.glb`. |
+| `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default is the compressed `/models/avatar.draco.glb`. |
 | `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
 | `VITE_ANDROID_DOWNLOAD_URL` | No | Direct Android installer URL in the Downloads menu; defaults to the Actions build page. |
 | `VITE_IOS_DOWNLOAD_URL` | No | App Store/TestFlight or signed iOS distribution page; defaults to the Actions build page. |
@@ -537,13 +537,13 @@ npm run preview --prefix client
 
 ### Avatar optimization
 
-The Draco pipeline compresses the avatar mesh and copies local decoder assets. The optional Python frontend loads this compressed model by default:
+The Draco pipeline compresses the source avatar and copies local decoder assets. The primary client loads the compressed model by default; the optional Python frontend points to the same generated asset:
 
 ```bash
 npm run models:draco --prefix client
 ```
 
-For the existing client, `VITE_AVATAR_MODEL_URL=/models/avatar.draco.glb` selects the generated file explicitly. The supplied GLB has no animation clips, skeleton, or morph targets, so Shanaya uses procedural idle motion and can display emotion state, but facial morph animation requires a rigged model with morph targets.
+The current avatar source is `client/public/models/avatar.glb`; its compressed runtime asset is `client/public/models/avatar.draco.glb`. It includes a skin and an `Idle` animation, which the avatar plays alongside its responsive procedural movement. It has morph targets without semantic names, so emotion-specific facial morphs cannot be mapped yet; the UI still shows the emotion indicator and body pose.
 
 ## Deployment
 
@@ -851,7 +851,7 @@ WebLLM needs a compatible WebGPU implementation and may need time to download a 
 
 ### Why does the avatar not appear?
 
-Confirm that `client/public/models/avatar.glb` exists, the browser can request `/models/avatar.glb`, and the browser console has no WebGL or asset-loading errors. Large models may take time to load on mobile hardware.
+Confirm that `client/public/models/avatar.draco.glb` exists, the browser can request `/models/avatar.draco.glb`, and the browser console has no WebGL or asset-loading errors. Large models may take time to load on mobile hardware.
 
 ### Why is speech silent?
 
