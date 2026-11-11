@@ -24,7 +24,7 @@ Shanaya is a source-available AI companion built for natural conversation across
   <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Linux package downloads" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
 </p>
 
-These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. Until the first release exists, use the [GitHub Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) to open a successful run and download its platform artifact. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`; blank values now fall back to the Actions page rather than an empty Releases page.
+These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. A normal build on `main` only creates temporary Actions artifacts, so the Releases page stays empty until the first release is published. To publish one without pushing a local tag, run the [Build Shanaya workflow](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml), enable **Publish the completed platform packages as a GitHub Release**, and enter a version such as `v1.0.0`. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`; blank values open Actions so you can download artifacts from a successful run.
 
 **iOS note:** A signed build exports an IPA, but installing on iPhone or iPad still requires TestFlight, the App Store, or another Apple-approved distribution method. Without Apple signing credentials, CI provides an Xcode archive for developers instead.
 
@@ -341,11 +341,11 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
 | `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default is the compressed `/models/avatar.draco.glb`. |
 | `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
-| `VITE_ANDROID_DOWNLOAD_URL` | No | Optional Android installer URL; defaults to the GitHub Releases page. |
-| `VITE_IOS_DOWNLOAD_URL` | No | Optional App Store/TestFlight URL; defaults to the GitHub Releases page. |
-| `VITE_MACOS_DOWNLOAD_URL` | No | Optional macOS installer URL; defaults to the GitHub Releases page. |
-| `VITE_WINDOWS_DOWNLOAD_URL` | No | Optional Windows installer URL; defaults to the GitHub Releases page. |
-| `VITE_LINUX_DOWNLOAD_URL` | No | Optional Linux package URL; defaults to the GitHub Releases page. |
+| `VITE_ANDROID_DOWNLOAD_URL` | No | Optional Android installer URL; blank opens the GitHub Actions build page. |
+| `VITE_IOS_DOWNLOAD_URL` | No | Optional App Store/TestFlight URL; blank opens the GitHub Actions build page. |
+| `VITE_MACOS_DOWNLOAD_URL` | No | Optional macOS installer URL; blank opens the GitHub Actions build page. |
+| `VITE_WINDOWS_DOWNLOAD_URL` | No | Optional Windows installer URL; blank opens the GitHub Actions build page. |
+| `VITE_LINUX_DOWNLOAD_URL` | No | Optional Linux package URL; blank opens the GitHub Actions build page. |
 
 ### Server environment: `server/.env`
 
@@ -547,7 +547,7 @@ For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS 
 
 ### Build artifacts and installation
 
-The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build also publishes a GitHub Release with stable platform package names. The repository currently has no release until the first version tag is pushed:
+The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build publishes a GitHub Release with stable platform package names. A manual run can also publish one by enabling the release input and providing a `vMAJOR.MINOR.PATCH` tag. A normal `main` build does not create a release:
 
 | Platform | Release asset | Format and installation notes |
 | --- | --- | --- |
@@ -565,9 +565,11 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 
+Alternatively, open **Actions → Build Shanaya → Run workflow**, select the branch to build, enable **Publish the completed platform packages as a GitHub Release**, and enter a new version tag such as `v1.0.1`. The release job creates that tag at the selected workflow commit and attaches the generated packages.
+
 For development builds, use the [Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) and download artifacts from a successful run.
 
-The in-app Downloads menu opens the Releases page by default. Set platform URL variables in `client/.env` to point to store listings or direct installer URLs when desired. Vite embeds these links at build time, so rebuild the client after changing them.
+The in-app Downloads menu opens the Actions build page until a release asset URL is configured. Set platform URL variables in `client/.env` to point to store listings or direct installer URLs when desired. Vite embeds these links at build time, so rebuild the client after changing them.
 
 To export a signed iOS IPA, configure the repository variable `IOS_SIGNING_ENABLED=true` and GitHub Actions secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, `APPSTORE_ISSUER_ID`, `APPSTORE_API_KEY_ID`, and `APPSTORE_API_PRIVATE_KEY`. For a device-installable iOS app, distribute the signed build through TestFlight or the App Store.
 
