@@ -1,0 +1,19 @@
+{
+  "name": "@shanaya/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "sync": "cap sync",
+    "sync:ios": "cap sync ios",
+    "sync:android": "cap sync android",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "llama-cpp-capacitor": "^0.1.5"
+  },
+  "devDependencies": { "@capacitor/cli": "^8.0.0" }
+}

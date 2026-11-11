@@ -120,9 +120,9 @@ jobs:
           VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
       - run: npx cap add android
         working-directory: client
-      - run: npm run cap:patch:android
-        working-directory: client
       - run: npx cap sync android
+        working-directory: client
+      - run: npm run cap:patch:android
         working-directory: client
       - name: Build Android package
         working-directory: client/android

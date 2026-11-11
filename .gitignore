@@ -1,10 +1,26 @@
-node_modules/
-client/node_modules/
-server/node_modules/
-client/dist/
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!client/.env.example
 server/.env
 client/.env
 client/.env.local
 client/.env.*.local
-!client/.env.example
+
+# Generated dependencies, builds, and Python artifacts
+node_modules/
+**/node_modules/
+client/dist/
+server/dist/
+apps/frontend/dist/
+__pycache__/
+**/__pycache__/
+.venv/
+venv/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
 .DS_Store

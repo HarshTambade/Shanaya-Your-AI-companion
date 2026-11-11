@@ -239,6 +239,42 @@ Provider behavior is outside this repository's control. Before production use, r
 
 ## Quick start
 
+### Python Edition (the default root workspace)
+
+This edition lives in `backend/`, `ebpf/`, and `apps/`. It uses the Python FastAPI agent, an in-process MCP tool host, the React Three Fiber frontend, and a Groq-first model router. Python 3.11+ is required by the MCP SDK.
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt
+cp .env.example .env
+npm install
+```
+
+Add your server-side `GROQ_API_KEY` to `.env`, then run:
+
+```bash
+npm run dev
+```
+
+The frontend runs on Vite and the API runs on port 8000 by default. `npm run build` builds the Python Edition frontend. Set `SHANAYA_HOST`, `SHANAYA_PORT`, `SHANAYA_CORS_ORIGINS`, and `VITE_API_BASE_URL` in `.env` when the API or frontend is hosted elsewhere. For a packaged mobile app, set `VITE_API_BASE_URL` to the reachable API address; `localhost` on a phone points to the phone itself.
+
+The requested Groq order is preserved in `.env.example`. Groq lists `llama-3.3-70b-versatile` and `llama-3.1-8b-instant` as retired for free and developer tiers, so those candidates can fail before the router reaches `openai/gpt-oss-120b`. Replace the `GROQ_MODELS` value with model IDs enabled for your account when needed ([Groq deprecation schedule](https://console.groq.com/docs/deprecations)). The configured secondary defaults are `gpt-4o`, `claude-sonnet-5`, and `gemini-3.8-flash`; provider model availability can change.
+
+Destructive tools (`write_file` and `execute_shell`) return a confirmation request and execute only after an explicit approval. `read_file` is workspace-confined. The eBPF loader is Linux-only and needs root, kernel headers, and the OS-provided BCC bindings. On Debian/Ubuntu, install `bpfcc-tools`, `python3-bpfcc`, and `linux-headers-$(uname -r)` first ([BCC install guide](https://github.com/iovisor/bcc/blob/master/INSTALL.md)). Then run:
+
+```bash
+sudo python3 ebpf/loader.py
+```
+
+The loader uses `SHANAYA_SENSES_URL` from its process environment or the local default. The pip package named `bcc` is not the Linux BPF Compiler Collection, so BCC is not installed by `backend/requirements.txt`.
+
+For Electron development, run `npm run dev:desktop`; the Python API, Vite frontend, and desktop shell start together. For iOS/Android, build the frontend and sync the corresponding Capacitor project from `@shanaya/mobile`. Native offline inference requires a compatible GGUF URL in `VITE_OFFLINE_MODEL_URL` before the app build. Before packaging Electron, run `npm run build`, then `npm run package --workspace @shanaya/desktop`. Packaged desktop builds serve the frontend from `http://localhost:5173`; the Python API must run separately or be hosted at the configured API URL. The Electron package does not bundle a Python interpreter or backend environment. Desktop packaging scripts are in `@shanaya/desktop`.
+
+### Existing Node/Express Edition
+
+The original `client/` and `server/` app remains available through `npm run dev:legacy` and `npm run build:legacy`.
+
 ### 1. Install dependencies
 
 ```bash
@@ -471,7 +507,7 @@ npm run cap:run:android --prefix client
 npm run cap:run:electron --prefix client
 ```
 
-The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` while setting up the generated Android project. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves. It only changes generated dependency files under `client/node_modules`.
+The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` after Capacitor synchronization. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves. It also aligns the `@pinecall/ionic` Java and Kotlin JVM targets to Java 17, preventing Gradle's inconsistent-target failure. It only changes generated dependency files under `client/node_modules`.
 
 The iOS workflow runs `npm run cap:patch:ios --prefix client` before generating the native project. This adds the system zlib linker flag required by the prebuilt native-agent FFI library, whose libgit2 symbols depend on `libz`.
 
@@ -519,13 +555,13 @@ npm run preview --prefix client
 
 ### Avatar optimization
 
-The optional Draco pipeline compresses the avatar model and copies decoder assets:
+The Draco pipeline compresses the avatar mesh and copies local decoder assets. The Python Edition loads this compressed model by default:
 
 ```bash
 npm run models:draco --prefix client
 ```
 
-Set `VITE_AVATAR_MODEL_URL=/models/avatar.draco.glb` when you want to use the generated asset.
+For the existing client, `VITE_AVATAR_MODEL_URL=/models/avatar.draco.glb` selects the generated file explicitly. The supplied GLB has no animation clips, skeleton, or morph targets, so Shanaya uses procedural idle motion and can display emotion state, but facial morph animation requires a rigged model with morph targets.
 
 ## Deployment
 

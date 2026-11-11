@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Environment, Html, OrbitControls, Stats, useAnimations, useGLTF, useProgress } from "@react-three/drei";
+import { Html, OrbitControls, Stats, useAnimations, useGLTF, useProgress } from "@react-three/drei";
 import { Box3, FloatType, Group, HalfFloatType, MathUtils, Mesh, PerspectiveCamera, RedFormat, RGBAFormat, RGBFormat, RGFormat, Scene, Texture, Vector3 } from "three";
 import { DRACOLoader } from "three-stdlib";
 import type { Emotion } from "../types";
@@ -43,7 +43,7 @@ const emotionPose: Record<Emotion, { lean: number; turn: number; tilt: number; b
 
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath("/draco/");
-const avatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim() || "/models/avatar.glb";
+const avatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim() || "/models/avatar.draco.glb";
 
 function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   const aliases = emotionMorphs[emotion];
@@ -108,22 +108,22 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     const viewHeight = 2 * 5.4 * Math.tan((perspectiveCamera.fov * Math.PI) / 360);
     const aspect = size.width / Math.max(1, size.height);
     const viewWidth = viewHeight * aspect;
-    const heightFraction = Math.min(0.54, 420 / Math.max(1, size.height));
+    const heightFraction = Math.min(0.47, 390 / Math.max(1, size.height));
     const heightLimit = viewHeight * heightFraction;
-    const widthLimit = viewWidth * 0.82 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
+    const widthLimit = viewWidth * 0.78 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
     const fitScale = Math.min(heightLimit, widthLimit) / Math.max(framing.sourceHeight, 0.001);
     const compactViewport = size.height < 700 || size.width < 560;
 
-    avatar.position.x = Math.sin(time * 0.42) * 0.045;
-    avatar.position.y = (compactViewport ? 0.58 : 0.4) + Math.sin(time * 1.25) * 0.04 + pose.bounce * pulse;
-    avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.52) * 0.025, 3.5, delta);
-    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.34) * 0.09, 2.8, delta);
-    avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.68) * 0.025, 3.5, delta);
+    avatar.position.x = Math.sin(time * 0.42) * 0.065;
+    avatar.position.y = (compactViewport ? 0.72 : 0.52) + Math.sin(time * 1.25) * 0.055 + pose.bounce * pulse;
+    avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.52) * 0.035, 3.5, delta);
+    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.34) * 0.14, 2.8, delta);
+    avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.68) * 0.035, 3.5, delta);
     const scale = 1 + (emotion === "surprised" ? 0.035 : 0.012) * pulse;
     avatar.scale.setScalar(MathUtils.damp(avatar.scale.x, scale, 4, delta));
 
     if (modelGroup) {
-      const breath = Math.sin(time * 1.8) * 0.008;
+      const breath = Math.sin(time * 1.8) * 0.012;
       const nextX = fitScale * (1 + breath * 0.5);
       const nextY = fitScale * (1 + breath);
       const nextZ = fitScale * (1 + breath * 0.5);
@@ -283,7 +283,6 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
         <pointLight position={[0, 1.8, 2.5]} intensity={0.95} color={emotionLight[emotion]} />
         <Suspense fallback={<SceneLoader />}>
           <Avatar emotion={emotion} />
-          <Environment preset="studio" />
         </Suspense>
         {import.meta.env.DEV && <><Stats /> <RendererBudgetMonitor /></>}
         <OrbitControls
