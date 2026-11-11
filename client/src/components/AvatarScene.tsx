@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { Box3, Group, MathUtils, Mesh, PerspectiveCamera, Vector3 } from "three";
+import { AnimationClip, Box3, Group, MathUtils, Mesh, PerspectiveCamera, Vector3 } from "three";
 import { DRACOLoader } from "three-stdlib";
 import type { Emotion } from "../types";
 
@@ -59,7 +59,22 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
   const model = useRef<Group>(null);
   const modelScaleInitialized = useRef(false);
   const emotionPulse = useRef(0);
-  const { actions } = useAnimations(animations, group);
+  const stableAnimations = useMemo(() => animations.map((animation) => {
+    // This avatar's Idle clip animates the face and its outline as full-mesh
+    // morphs. That deformation makes the facial features disappear at some keys.
+    // Keep the clothing, hair, and body animation while holding the face pose.
+    const tracks = animation.tracks.filter(({ name }) => {
+      const trackName = name.toLowerCase();
+      return trackName !== "head_09.quaternion"
+        && trackName !== "neck_08.quaternion"
+        && trackName !== "object_123.morphtargetinfluences"
+        && trackName !== "object_124.morphtargetinfluences";
+    });
+    return tracks.length === animation.tracks.length
+      ? animation
+      : new AnimationClip(animation.name, animation.duration, tracks, animation.blendMode);
+  }), [animations]);
+  const { actions } = useAnimations(stableAnimations, group);
   const { camera, size } = useThree();
 
   useEffect(() => {
@@ -79,14 +94,14 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
   }, [scene]);
 
   useEffect(() => {
-    const idleAnimation = animations.find((animation) => /idle|stand|breath/i.test(animation.name)) ?? animations[0];
+    const idleAnimation = stableAnimations.find((animation) => /idle|stand|breath/i.test(animation.name)) ?? stableAnimations[0];
     const firstAction = idleAnimation ? actions[idleAnimation.name] : undefined;
     firstAction?.reset().fadeIn(0.5).play();
     onMotionChange?.(firstAction ? "animation" : "procedural");
     return () => {
       firstAction?.fadeOut(0.25);
     };
-  }, [actions, animations, onMotionChange]);
+  }, [actions, stableAnimations, onMotionChange]);
 
   useFrame(({ clock }, delta) => {
     if (!group.current) return;
