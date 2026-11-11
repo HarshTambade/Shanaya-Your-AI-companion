@@ -131,6 +131,12 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const callActiveRef = useRef(false);
   const callMicEnabledRef = useRef(false);
   const callSpeakerRef = useRef(true);
+  const voiceEnabledRef = useRef(voiceEnabled);
+  const voiceInputEnabledRef = useRef(false);
+  const voiceTurnPendingRef = useRef(false);
+  const voiceStartPendingRef = useRef(false);
+  const isSubmittingTurnRef = useRef(false);
+  voiceEnabledRef.current = voiceEnabled;
   const isOnline = useConnectivity();
   const platform = Capacitor.getPlatform();
   const isNative = platform === "ios" || platform === "android";
@@ -222,7 +228,10 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   }, [isNative]);
 
   useEffect(() => () => {
-    void voiceSessionRef.current?.();
+    voiceInputEnabledRef.current = false;
+    const stop = voiceSessionRef.current;
+    voiceSessionRef.current = null;
+    void stop?.();
   }, []);
 
   useEffect(() => {
@@ -257,14 +266,27 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const submitMessage = async (event?: FormEvent<HTMLFormElement>, transcript?: string, speakReply = voiceEnabled) => {
     event?.preventDefault();
     const content = (transcript ?? input).trim();
-    if (!content || isLoading) return;
+    if (!content || isLoading || isSubmittingTurnRef.current || (voiceTurnPendingRef.current && transcript === undefined)) return false;
     if (effectiveMode === "webllm" && localLLM.status !== "ready") {
       setError(localLLM.status === "unsupported" ? "WebGPU is unavailable. Reconnect or use the native app for offline AI." : "The browser model is still preparing or could not load.");
-      return;
+      return false;
     }
     if (effectiveMode === "native" && nativeStatus !== "available") {
       setError(nativeStatus === "downloadable" ? "Prepare the offline model while online, then try again." : "This device does not have a supported on-device AI model.");
-      return;
+      return false;
+    }
+
+    isSubmittingTurnRef.current = true;
+    const activeVoiceSession = voiceSessionRef.current;
+    if (activeVoiceSession) {
+      voiceSessionRef.current = null;
+      voiceTurnPendingRef.current = true;
+      setIsListening(false);
+      try {
+        await activeVoiceSession();
+      } catch {
+        // Continue the user-requested turn if recognition already stopped.
+      }
     }
 
     const nextMessages = [...messages, { role: "user" as const, content }];
@@ -336,17 +358,23 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
     } finally {
       setIsLoading(false);
       setAgentActivity(null);
+      isSubmittingTurnRef.current = false;
       inputRef.current?.focus();
-      if (callActiveRef.current && callMicEnabledRef.current) {
-        const resumeListening = () => {
-          if (callActiveRef.current && callMicEnabledRef.current && !isLoading) {
-            startCallListeningRef.current();
-          }
-        };
+      const canResumeVoice = voiceInputEnabledRef.current && (!callActiveRef.current || callMicEnabledRef.current);
+      const resumeListening = () => {
+        voiceTurnPendingRef.current = false;
+        if (voiceInputEnabledRef.current && (!callActiveRef.current || callMicEnabledRef.current)) {
+          startCallListeningRef.current();
+        }
+      };
+      if (canResumeVoice) {
         if (spokenReply) void spokenReply.then(() => window.setTimeout(resumeListening, 350));
         else window.setTimeout(resumeListening, 350);
+      } else {
+        voiceTurnPendingRef.current = false;
       }
     }
+    return true;
   };
 
   const saveMobileAgentKey = async () => {
@@ -377,6 +405,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
     setError("");
     callActiveRef.current = true;
     callMicEnabledRef.current = true;
+    voiceInputEnabledRef.current = true;
     setIsVirtualCallActive(true);
     setIsCallMicEnabled(true);
     setCallStartedAt(Date.now());
@@ -390,6 +419,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const endVirtualCall = async () => {
     callActiveRef.current = false;
     callMicEnabledRef.current = false;
+    voiceInputEnabledRef.current = false;
     const stop = voiceSessionRef.current;
     voiceSessionRef.current = null;
     try {
@@ -421,16 +451,43 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   };
 
   const startVoiceInputSession = async () => {
-    if (voiceSessionRef.current) return;
+    if (voiceSessionRef.current || voiceStartPendingRef.current || voiceTurnPendingRef.current || !voiceInputEnabledRef.current || isLoading || isSpeaking) return;
+    voiceStartPendingRef.current = true;
     setError("");
     try {
-      voiceSessionRef.current = await VoiceService.startSession(speechLanguage, (transcript, isFinal) => {
+      const stop = await VoiceService.startSession(speechLanguage, (transcript, isFinal) => {
+        if (voiceTurnPendingRef.current) return;
         setInput(transcript);
-        if (isFinal) {
-          void submitMessage(undefined, transcript, callSpeakerRef.current);
-        }
+        if (!isFinal) return;
+
+        // Stop the microphone before Shanaya responds so speech recognition
+        // cannot mistake the synthesized reply for the next user turn.
+        voiceTurnPendingRef.current = true;
+        const activeSession = voiceSessionRef.current;
+        voiceSessionRef.current = null;
+        setIsListening(false);
+        void (async () => {
+          try {
+            await activeSession?.();
+          } catch {
+            // Recognition may have ended itself after returning the final result.
+          }
+          if (!voiceInputEnabledRef.current || (callActiveRef.current && !callMicEnabledRef.current)) {
+            voiceTurnPendingRef.current = false;
+            return;
+          }
+          const shouldSpeakReply = callActiveRef.current ? callSpeakerRef.current : voiceEnabledRef.current;
+          const accepted = await submitMessage(undefined, transcript, shouldSpeakReply);
+          if (!accepted) {
+            voiceTurnPendingRef.current = false;
+            if (voiceInputEnabledRef.current && (!callActiveRef.current || callMicEnabledRef.current)) {
+              startCallListeningRef.current();
+            }
+          }
+        })();
       }, (message) => {
         setError(message);
+        voiceInputEnabledRef.current = false;
         const stop = voiceSessionRef.current;
         voiceSessionRef.current = null;
         setIsListening(false);
@@ -440,26 +497,50 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
           setIsCallMicEnabled(false);
         }
       });
+      if (!voiceInputEnabledRef.current || voiceTurnPendingRef.current) {
+        await stop();
+        return;
+      }
+      voiceSessionRef.current = stop;
       setIsListening(true);
       setVoiceStatus(`Listening in ${speechLanguage} · speak to send`);
     } catch (voiceError) {
       voiceSessionRef.current = null;
+      voiceInputEnabledRef.current = false;
       setIsListening(false);
       setError(voiceError instanceof Error ? voiceError.message : "Could not start voice input.");
       if (callActiveRef.current) {
         callMicEnabledRef.current = false;
         setIsCallMicEnabled(false);
       }
+    } finally {
+      voiceStartPendingRef.current = false;
     }
   };
 
   startCallListeningRef.current = () => { void startVoiceInputSession(); };
 
+  useEffect(() => {
+    if (
+      voiceInputEnabledRef.current
+      && !voiceSessionRef.current
+      && !voiceStartPendingRef.current
+      && !voiceTurnPendingRef.current
+      && !isLoading
+      && !isSpeaking
+      && (!callActiveRef.current || callMicEnabledRef.current)
+    ) {
+      startCallListeningRef.current();
+    }
+  }, [isCallMicEnabled, isLoading, isListening, isSpeaking, isVirtualCallActive]);
+
   const toggleVoiceInput = async () => {
     if (!isListening) {
+      voiceInputEnabledRef.current = true;
       await startVoiceInputSession();
       return;
     }
+    voiceInputEnabledRef.current = false;
     try {
       await voiceSessionRef.current?.();
     } finally {
@@ -472,6 +553,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const toggleCallMicrophone = () => {
     const enabled = !callMicEnabledRef.current;
     callMicEnabledRef.current = enabled;
+    voiceInputEnabledRef.current = enabled;
     setIsCallMicEnabled(enabled);
     if (enabled) {
       if (!isLoading && !isSpeaking) startCallListeningRef.current();
