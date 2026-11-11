@@ -517,21 +517,14 @@ The native application is configured as:
 | App ID | `com.shanaya.companion` |
 | Web directory | `client/dist` |
 
-Add platforms once:
-
-```bash
-npm run cap:add:ios --prefix client
-npm run cap:add:android --prefix client
-npm run cap:add:electron --prefix client
-```
-
-After adding iOS and Android, sync the installed native plugins:
+The Android and iOS project sources are checked in under `client/android/` and `client/ios/`. Sync the app bundle and native plugins after changing client dependencies:
 
 ```bash
 npm run cap:sync --prefix client
+npm run cap:add:electron --prefix client
 ```
 
-After adding Android, add flashlight access to `client/android/app/src/main/AndroidManifest.xml` before `<application>`:
+To add flashlight access, add this permission to `client/android/app/src/main/AndroidManifest.xml` before `<application>`:
 
 ```xml
 <uses-permission android:name="android.permission.FLASHLIGHT" />
@@ -545,9 +538,9 @@ npm run cap:run:android --prefix client
 npm run cap:run:electron --prefix client
 ```
 
-The Android workflow installs SDK 36 and runs `npm run cap:patch:android --prefix client` after Capacitor synchronization. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves, aligns the `@pinecall/ionic` Java and Kotlin JVM targets to Java 17, and adds the microphone permission to the generated app manifest.
+The Android workflow installs SDK 36, syncs the checked-in Gradle project, and runs `npm run cap:patch:android --prefix client`. This repeatable patch supplies the Kotlin Gradle plugin classpath required by third-party native modules that apply `kotlin-android` without declaring it themselves, aligns the `@pinecall/ionic` Java and Kotlin JVM targets to Java 17, and adds the microphone permission to the app manifest.
 
-The iOS workflow runs `npm run cap:patch:ios --prefix client` after Capacitor synchronization. It adds the system zlib linker flag required by the prebuilt native-agent FFI library and microphone/speech usage descriptions required by native voice input.
+The iOS workflow runs `npm run cap:patch:ios --prefix client` and syncs the checked-in Xcode project. It adds the system zlib linker flag required by the prebuilt native-agent FFI library, the privacy manifest, and microphone/speech usage descriptions required by native voice input.
 
 For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS API URL or the development computer's LAN IP in `VITE_API_BASE_URL`.
 
@@ -562,20 +555,20 @@ The GitHub Actions workflow builds the web, mobile, and Electron targets on pull
 | macOS | `Shanaya-macOS.dmg` | Electron installer. Code signing and notarization depend on Apple credentials. |
 | Windows | `Shanaya-Windows.exe` | Electron installer. Authenticode signing depends on configured credentials. |
 | Linux | `Shanaya-Linux.AppImage`, `Shanaya-Linux.deb` | Electron AppImage and/or DEB packages from the Linux runner. |
-| Web/PWA | `shanaya-web-pwa` | Static `dist` bundle. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
+| Web/PWA | Actions artifact `shanaya-web-pwa` | Static `dist` bundle. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
 
 Create and push a version tag to build and publish installers:
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
-Alternatively, open **Actions → Build Shanaya → Run workflow**, select the branch to build, enable **Publish the completed platform packages as a GitHub Release**, and enter a new version tag such as `v1.0.1`. The release job creates that tag at the selected workflow commit and attaches the generated packages.
+Alternatively, open **Actions → Build Shanaya → Run workflow**, select the branch to build, enable **Publish the completed platform packages as a GitHub Release**, and enter a new version tag such as `v1.0.3`. The release job creates that tag at the selected workflow commit and attaches the generated packages.
 
 For development builds, use the [Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) and download artifacts from a successful run.
 
-The in-app Downloads menu opens the Actions build page until a release asset URL is configured. Set platform URL variables in `client/.env` to point to store listings or direct installer URLs when desired. Vite embeds these links at build time, so rebuild the client after changing them.
+The in-app Downloads menu links to the latest Android and desktop installers on GitHub Releases by default. iOS opens the release notes because an installable IPA requires Apple signing and TestFlight or App Store distribution. Set platform URL variables in `client/.env` to point to store listings or another installer host. Vite embeds these links at build time, so rebuild the client after changing them.
 
 To export a signed iOS IPA, configure the repository variable `IOS_SIGNING_ENABLED=true` and GitHub Actions secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, `APPSTORE_ISSUER_ID`, `APPSTORE_API_KEY_ID`, and `APPSTORE_API_PRIVATE_KEY`. For a device-installable iOS app, distribute the signed build through TestFlight or the App Store.
 
@@ -585,11 +578,11 @@ The GitHub Actions workflow in [`.github/workflows/build.yml`](./.github/workflo
 
 - **Web/PWA:** installs with lifecycle scripts disabled, generates the Draco avatar, and uploads `shanaya-web-pwa`.
 - **Electron:** generates the Capacitor Electron project, vendors runtime plugins, ignores invalid directory-valued certificate settings, and disables automatic Snap Store publishing. Tagged builds publish the generated installers through the dedicated GitHub Release job instead.
-- **Android:** installs SDK 36, NDK 29, and CMake 3.22.1; applies the Kotlin Gradle patch after Capacitor generates the native project; uploads debug or signed release APKs.
-- **iOS:** applies the native-agent zlib linker patch before project generation, adds privacy and speech permission metadata, archives the generated Xcode project/workspace, and exports an IPA when Apple signing is configured.
+- **Android:** installs SDK 36, NDK 29, and CMake 3.22.1; syncs the checked-in Gradle project, applies native compatibility patches, and uploads debug or signed release APKs.
+- **iOS:** patches and syncs the checked-in Xcode project, includes privacy and speech permission metadata, archives it, and exports an IPA when Apple signing is configured.
 - **Releases:** on `v*` tags, gathers the Android, iOS, macOS, Windows, and Linux outputs and attaches their install packages to a GitHub Release. The release job has `contents: write` permission; other build jobs remain read-only.
 
-The native patch scripts modify only dependency files under `client/node_modules`; they are not source changes to the third-party packages and are rerun after clean installs.
+Native compatibility patches update third-party dependency files under `client/node_modules`; the iOS patch also keeps the app privacy manifest and microphone descriptions in the checked-in Xcode project. Dependency changes are reapplied after clean installs.
 
 ### PWA
 
@@ -793,7 +786,9 @@ Fetches credentials from the configured trusted Pinecall token issuer. It return
 │   │   ├── App.tsx                   # Application composition
 │   │   ├── index.css                 # Global styles
 │   │   └── types.ts                  # Shared client types
-│   ├── config/PrivacyInfo.xcprivacy  # iOS privacy manifest
+│   ├── android/                      # Android Studio project and Gradle wrapper
+│   ├── ios/                          # Xcode project and Swift app lifecycle
+│   ├── config/PrivacyInfo.xcprivacy  # iOS privacy manifest source
 │   ├── scripts/                      # Asset/build helpers
 │   ├── .env.example                  # Client configuration template
 │   ├── capacitor.config.ts           # Native app configuration
@@ -991,7 +986,7 @@ Contributions are welcome.
    - Any platform-specific limitations
    - Any new environment variables or provider requirements
 
-Please avoid committing generated platform directories, downloaded models, secrets, or unrelated formatting changes.
+Keep the checked-in Android and iOS project sources in sync with Capacitor config changes. Do not commit generated web bundles, copied native web assets, build outputs, downloaded models, secrets, or unrelated formatting changes.
 
 ### Pull request checklist
 
@@ -1000,7 +995,7 @@ Please avoid committing generated platform directories, downloaded models, secre
 - [ ] Type-check/build passes.
 - [ ] Documentation and `.env.example` files are updated when needed.
 - [ ] New provider or platform behavior has clear error handling.
-- [ ] No secrets, downloaded models, or generated native artifacts are included.
+- [ ] No secrets, downloaded models, generated web assets, or native build outputs are included.
 - [ ] Third-party license and attribution requirements were checked.
 
 ### Commit and issue conventions

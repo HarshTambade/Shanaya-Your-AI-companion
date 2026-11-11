@@ -134,8 +134,6 @@ jobs:
         working-directory: client
         env:
           VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
-      - run: npx cap add android
-        working-directory: client
       - run: npx cap sync android
         working-directory: client
       - run: npm run cap:patch:android
@@ -183,32 +181,6 @@ jobs:
         working-directory: client
         env:
           VITE_AVATAR_MODEL_URL: /models/avatar.draco.glb
-      - run: npx cap add ios
-        working-directory: client
-      - run: cp config/PrivacyInfo.xcprivacy ios/App/App/PrivacyInfo.xcprivacy
-        working-directory: client
-      - name: Add iOS privacy manifest to app target
-        working-directory: client
-        run: |
-          ruby - <<'RUBY'
-          require 'xcodeproj'
-          project = Xcodeproj::Project.open('ios/App/App.xcodeproj')
-          target = project.targets.find { |candidate| candidate.name == 'App' }
-          raise 'Capacitor App target not found' unless target
-          app_group = project.main_group.children.find { |child| child.path == 'App' || child.name == 'App' }
-          raise 'Capacitor App group not found' unless app_group
-          file = app_group.files.find { |candidate| candidate.path == 'PrivacyInfo.xcprivacy' } || app_group.new_file('PrivacyInfo.xcprivacy')
-          target.resources_build_phase.add_file_reference(file)
-          project.save
-          RUBY
-      - name: Add iOS speech permission descriptions
-        working-directory: client
-        run: |
-          INFO=ios/App/App/Info.plist
-          /usr/libexec/PlistBuddy -c 'Set :NSMicrophoneUsageDescription Shanaya uses the microphone to transcribe voice messages.' "$INFO" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c 'Add :NSMicrophoneUsageDescription string Shanaya uses the microphone to transcribe voice messages.' "$INFO"
-          /usr/libexec/PlistBuddy -c 'Set :NSSpeechRecognitionUsageDescription Shanaya uses speech recognition to transcribe voice messages.' "$INFO" 2>/dev/null \
-            || /usr/libexec/PlistBuddy -c 'Add :NSSpeechRecognitionUsageDescription string Shanaya uses speech recognition to transcribe voice messages.' "$INFO"
       - run: npx cap sync ios
         working-directory: client
       - name: Import Apple signing certificate
@@ -304,6 +276,9 @@ jobs:
             echo "Invalid release tag '$RELEASE_TAG'; use vMAJOR.MINOR.PATCH (optionally with a prerelease suffix)." >&2
             exit 1
           fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: shanaya-*

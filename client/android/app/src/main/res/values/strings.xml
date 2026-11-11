@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Shanaya</string>
+    <string name="title_activity_main">Shanaya</string>
+    <string name="package_name">com.shanaya.companion</string>
+    <string name="custom_url_scheme">com.shanaya.companion</string>
+</resources>
