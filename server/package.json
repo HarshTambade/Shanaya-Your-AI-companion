@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-    "dev": "node --watch index.js",
+    "dev": "node index.js",
     "start": "node index.js"
   },
   "engines": {

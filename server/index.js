@@ -381,6 +381,15 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Shanaya API listening on http://localhost:${port}`);
+});
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`Shanaya API could not start: port ${port} is already in use. Stop the existing process or set PORT to another value.`);
+  } else {
+    console.error("Shanaya API could not start:", error);
+  }
+  process.exitCode = 1;
 });
