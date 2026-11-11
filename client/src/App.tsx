@@ -55,9 +55,9 @@ export default function App() {
             <div className="min-w-0 rounded-xl border border-white/[0.08] bg-[#0c101b]/80 px-3 py-2 backdrop-blur-xl sm:px-4 sm:py-2.5">
               <p className="text-[8px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:text-[9px]">Model movement</p>
               <div className="mt-1 flex items-center gap-2">
-                <span className={`h-2 w-2 shrink-0 rounded-full ${motion === "loading" ? "animate-pulse bg-amber-300" : "bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.6)]"}`} />
+                <span className={`h-2 w-2 shrink-0 rounded-full ${motion === "loading" ? "animate-pulse bg-amber-300" : motion === "error" ? "bg-rose-300" : "bg-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.6)]"}`} />
                 <span className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-200 sm:text-[11px]">
-                  {motion === "loading" ? "Loading model" : motion === "animation" ? "Idle animation active" : "Live motion active"}
+                  {motion === "loading" ? "Loading model" : motion === "animation" ? "Idle animation active" : motion === "error" ? "Avatar unavailable" : "Live motion active"}
                 </span>
               </div>
             </div>

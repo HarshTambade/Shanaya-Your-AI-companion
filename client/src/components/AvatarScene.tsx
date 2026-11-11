@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
 import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
@@ -33,10 +33,33 @@ const emotionPose: Record<Emotion, { lean: number; turn: number; tilt: number; b
 };
 
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath("/draco/");
-const avatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim() || "/models/avatar.draco.glb";
+const publicBaseUrl = import.meta.env.BASE_URL;
+dracoLoader.setDecoderPath(`${publicBaseUrl}draco/`);
+const configuredAvatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim();
+const avatarModelUrl = configuredAvatarModelUrl || `${publicBaseUrl}models/avatar.draco.glb`;
+const uncompressedAvatarModelUrl = `${publicBaseUrl}models/avatar.glb`;
 
-export type AvatarMotion = "loading" | "animation" | "procedural";
+export type AvatarMotion = "loading" | "animation" | "procedural" | "error";
+
+class AvatarLoadBoundary extends Component<{
+  children: ReactNode;
+  fallback: ReactNode;
+  onError?: () => void;
+}, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError?.();
+  }
+
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
 
 function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   const aliases = emotionMorphs[emotion];
@@ -94,8 +117,8 @@ function cloneAvatarResources(scene: Group) {
   };
 }
 
-function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void }) {
-  const { scene, animations } = useGLTF(avatarModelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
+function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void; modelUrl: string }) {
+  const { scene, animations } = useGLTF(modelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
   // Keep the render-time clone CPU-only; clone GPU resources in the effect so
   // StrictMode's intentional double render cannot leak discarded resources.
   const avatar = useMemo(() => SkeletonUtils.clone(scene) as Group, [scene]);
@@ -217,7 +240,23 @@ function SceneLoader() {
   );
 }
 
+function SceneError({ onMotionChange }: { onMotionChange?: (motion: AvatarMotion) => void }) {
+  useEffect(() => onMotionChange?.("error"), [onMotionChange]);
+  return (
+    <Html center>
+      <div className="w-64 rounded-xl border border-rose-300/15 bg-[#0c101b]/90 px-4 py-3 text-center shadow-xl">
+        <p className="text-xs font-semibold text-slate-200">Avatar could not be displayed</p>
+        <p className="mt-1 text-[10px] leading-relaxed text-slate-400">Refresh the page to try loading the model again.</p>
+      </div>
+    </Html>
+  );
+}
+
 export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void }) {
+  const [useUncompressedModel, setUseUncompressedModel] = useState(false);
+  const canFallback = !configuredAvatarModelUrl && avatarModelUrl !== uncompressedAvatarModelUrl;
+  const modelUrl = useUncompressedModel ? uncompressedAvatarModelUrl : avatarModelUrl;
+
   return (
     <div className="relative h-full w-full">
       <Canvas
@@ -230,9 +269,15 @@ export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emot
         <directionalLight position={[3, 5, 4]} intensity={3.1} color="#fff2df" />
         <directionalLight position={[-4, 2, -3]} intensity={2.2} color="#a6a5ff" />
         <pointLight position={[0, 1.8, 2.5]} intensity={0.95} color={emotionLight[emotion]} />
-        <Suspense fallback={<SceneLoader />}>
-          <Avatar emotion={emotion} onMotionChange={onMotionChange} />
-        </Suspense>
+        <AvatarLoadBoundary
+          key={modelUrl}
+          onError={canFallback && !useUncompressedModel ? () => setUseUncompressedModel(true) : undefined}
+          fallback={<SceneError onMotionChange={onMotionChange} />}
+        >
+          <Suspense fallback={<SceneLoader />}>
+            <Avatar emotion={emotion} onMotionChange={onMotionChange} modelUrl={modelUrl} />
+          </Suspense>
+        </AvatarLoadBoundary>
         <OrbitControls
           target={[0, 1.1, 0]}
           enablePan={false}
