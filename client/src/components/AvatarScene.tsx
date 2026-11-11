@@ -1,7 +1,7 @@
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Html, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
+import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, SkinnedMesh, Texture, Vector3 } from "three";
 import { DRACOLoader, SkeletonUtils } from "three-stdlib";
 import type { Emotion } from "../types";
 
@@ -195,7 +195,13 @@ function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMot
   }, [avatar]);
 
   const framing = useMemo(() => {
-    const bounds = new Box3().setFromObject(avatar);
+    // Include deformed skin vertices: the GLB's undeformed geometry bounds are
+    // much smaller than the visible character and crop the head when fitted.
+    avatar.updateMatrixWorld(true);
+    avatar.traverse((object) => {
+      if ((object as SkinnedMesh).isSkinnedMesh) (object as SkinnedMesh).skeleton.update();
+    });
+    const bounds = new Box3().setFromObject(avatar, true);
     const modelSize = bounds.getSize(new Vector3());
     const center = bounds.getCenter(new Vector3());
     return {
