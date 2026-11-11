@@ -6,8 +6,8 @@ import type { Emotion } from "../services/LLMRouter";
 import {
   getModelCatalog,
   parseStructuredReply,
-  resolveApproval,
   routeAgent,
+  ApprovalChannel,
   type Approval,
   type ChatMessage,
   type ModelCatalog,
@@ -56,6 +56,9 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
   const [isPreparingNativeModel, setIsPreparingNativeModel] = useState(false);
   const [nativeDownloadProgress, setNativeDownloadProgress] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const approvalChannelRef = useRef<ApprovalChannel | null>(null);
+  const historyRef = useRef(history);
+  historyRef.current = history;
   const isNative = supportsNativeLLM() && (Capacitor.getPlatform() === "ios" || Capacitor.getPlatform() === "android");
   const effectiveLocalMode = mode === "local" || !online;
   const localLLM = useBrowserLLM((effectiveLocalMode || fallbackRequested) && !isNative ? WEBLLM_MODEL : undefined);
@@ -98,6 +101,22 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
     return () => {
       window.removeEventListener("online", setConnection);
       window.removeEventListener("offline", setConnection);
+    };
+  }, []);
+
+  useEffect(() => {
+    const channel = new ApprovalChannel((approval) => {
+      setPendingTurn((current) => {
+        if (current?.approvals.some((item) => item.token === approval.token)) return current;
+        return { approvals: [approval], messages: historyRef.current };
+      });
+      setActivity("A proposed action is waiting for your approval.");
+    });
+    approvalChannelRef.current = channel;
+    void channel.connect().catch(() => undefined);
+    return () => {
+      channel.close();
+      if (approvalChannelRef.current === channel) approvalChannelRef.current = null;
     };
   }, []);
 
@@ -194,12 +213,16 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
   };
 
   const runCloudTurn = async (messages: ChatMessage[]) => {
+    const approvalChannel = approvalChannelRef.current;
+    if (!approvalChannel) throw new Error("The approval channel is unavailable. Reopen the chat and try again.");
+    await approvalChannel.connect().catch(() => undefined);
     const result = await routeAgent(
       messages,
       selectedModel || undefined,
       () => generateLocal(messages),
       isNative ? "llama.cpp" : "WebLLM",
       isNative ? "shanaya.gguf" : WEBLLM_MODEL,
+      approvalChannel.sessionId,
     );
     applyCompletedTurn(result, messages);
   };
@@ -252,7 +275,9 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
     setError("");
     setActivity(approved ? "Applying the approved action…" : "Recording your decision…");
     try {
-      const results = await Promise.all(pendingTurn.approvals.map((approval) => resolveApproval(approval.token, approved)));
+      const channel = approvalChannelRef.current;
+      if (!channel) throw new Error("The approval channel is unavailable. No action was executed.");
+      const results = await Promise.all(pendingTurn.approvals.map((approval) => channel.resolve(approval.token, approved)));
       let continuation = [...pendingTurn.messages];
       for (const result of results) {
         continuation.push({
@@ -260,6 +285,11 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
           tool_call_id: result.tool_call_id,
           content: JSON.stringify(result.result),
         });
+        const actionName = pendingTurn.approvals.find((item) => item.tool_call_id === result.tool_call_id)?.name;
+        setVisibleMessages((current) => [...current, {
+          role: "system",
+          content: `${result.approved ? "Approved" : "Rejected"}${actionName ? ` ${actionName.replaceAll("_", " ")}` : " action"}.`,
+        }]);
       }
       setPendingTurn(null);
       setActivity("Shanaya is continuing…");
@@ -372,8 +402,8 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
                 ))}
               </ul>
               <div className="flex gap-2">
-                <button type="button" onClick={() => void resolvePendingTurn(true)} disabled={loading} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-400/15 px-3 py-2 text-xs font-medium text-emerald-100 disabled:opacity-50"><Check size={13} />Approve all</button>
-                <button type="button" onClick={() => void resolvePendingTurn(false)} disabled={loading} className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 disabled:opacity-50">Deny all</button>
+                <button type="button" onClick={() => void resolvePendingTurn(true)} disabled={loading} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-400/15 px-3 py-2 text-xs font-medium text-emerald-100 disabled:opacity-50"><Check size={13} />Approve</button>
+                <button type="button" onClick={() => void resolvePendingTurn(false)} disabled={loading} className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-300 disabled:opacity-50">Reject</button>
               </div>
             </div>
           )}

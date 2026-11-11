@@ -50,6 +50,7 @@
         </a>
         <nav aria-label="Main navigation">
           <a class="hide-small" href="#features">Features</a>
+          <a class="hide-small" href="#api">API</a>
           <a class="hide-small" href="#privacy">Privacy</a>
           <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-">Source</a>
           <a class="button" href="/">Open Shanaya</a>
@@ -91,6 +92,27 @@
           <h2 id="privacy-title">Choose how Shanaya processes your messages</h2>
           <p>In cloud mode, conversation content is sent through the configured Shanaya API to the selected AI provider to generate a reply. Provider privacy and retention terms apply. Optional local inference can keep prompts on the device after its model is available. Shanaya does not claim that cloud requests are offline or zero-retention.</p>
           <p class="note">Supported device actions use explicit confirmation prompts. Availability is limited by the operating system and app permissions; Shanaya does not have unrestricted control over every device or application.</p>
+        </section>
+
+        <section id="api" class="section" aria-labelledby="api-title">
+          <p class="eyebrow">Built for integration</p>
+          <h2 id="api-title">A clear API for AI chat, agents, voice, and tools</h2>
+          <p>Integrate Shanaya into a web app, mobile client, desktop shell, or automation workflow through a small Express API. Use the same-origin <code>/api</code> routes in production, keep provider credentials on the server, and select cloud or Ollama inference per request.</p>
+          <div class="grid">
+            <article class="card">
+              <h3>Chat and models</h3>
+              <p><code>GET /api/health</code>, <code>GET /api/models</code>, and <code>POST /api/chat</code> provide readiness, model discovery, and normalized replies with emotion metadata.</p>
+            </article>
+            <article class="card">
+              <h3>Agents and voice</h3>
+              <p><code>POST /api/agent</code> supports bounded tool-calling steps, while <code>POST /api/tts</code> proxies optional multilingual Mithi speech synthesis.</p>
+            </article>
+            <article class="card">
+              <h3>Secure extensions</h3>
+              <p>Optional Pinecall token exchange, Electron computer use, and authenticated MCP tools keep sensitive credentials and provider calls behind the server boundary.</p>
+            </article>
+          </div>
+          <p class="note">Read the <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/blob/main/docs/API-INTEGRATION.md">API integration guide</a> for cURL examples, schemas, environment variables, error codes, CORS, and production security requirements.</p>
         </section>
 
         <section class="section" aria-labelledby="platform-title">

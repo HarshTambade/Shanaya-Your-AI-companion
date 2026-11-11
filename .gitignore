@@ -9,6 +9,7 @@ client/.env.local
 client/.env.*.local
 
 # Generated dependencies, builds, and Python artifacts
+logs/
 node_modules/
 **/node_modules/
 client/dist/

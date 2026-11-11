@@ -6,7 +6,6 @@ struct open_event_t {
     u32 uid;
     int flags;
     char comm[TASK_COMM_LEN];
-    char filename[256];
 };
 
 BPF_PERF_OUTPUT(events);
@@ -20,7 +19,6 @@ TRACEPOINT_PROBE(syscalls, sys_enter_openat) {
     event.uid = uid_gid & 0xffffffff;
     event.flags = args->flags;
     bpf_get_current_comm(&event.comm, sizeof(event.comm));
-    bpf_probe_read_user_str(&event.filename, sizeof(event.filename), args->filename);
     events.perf_submit(args, &event, sizeof(event));
     return 0;
 }

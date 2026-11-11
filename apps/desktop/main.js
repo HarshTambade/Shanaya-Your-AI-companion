@@ -1,7 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
-const net = require("node:net");
 const { createServer } = require("node:http");
 const path = require("node:path");
 
@@ -27,20 +26,17 @@ const mimeTypes = {
 };
 
 function isPythonApiAlreadyRunning() {
-  return new Promise((resolve) => {
-    const socket = net.createConnection({ host: "127.0.0.1", port: 8000 });
-    const finish = (available) => {
-      socket.destroy();
-      resolve(available);
-    };
-    socket.setTimeout(300, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
+  return fetch("http://127.0.0.1:8000/api/health", { signal: AbortSignal.timeout(500) })
+    .then(async (response) => {
+      if (!response.ok) return false;
+      const status = await response.json().catch(() => ({}));
+      return status.status === "ok";
+    })
+    .catch(() => false);
 }
 
 function startPythonFallback() {
-  if (process.env.SHANAYA_ENABLE_PYTHON_FALLBACK !== "true") return Promise.resolve();
+  if (process.env.SHANAYA_ENABLE_PYTHON_FALLBACK === "false") return Promise.resolve();
   return isPythonApiAlreadyRunning().then((alreadyRunning) => {
     // If another local fallback already owns the port, leave it alone.
     if (alreadyRunning || pythonBackend || process.env.SHANAYA_SKIP_PYTHON_SPAWN === "true") return;
@@ -53,13 +49,18 @@ function startPythonFallback() {
       "GROQ_API_KEY", "GROQ_MODELS", "OPENAI_API_KEY", "OPENAI_MODELS", "ANTHROPIC_API_KEY", "ANTHROPIC_MODELS",
       "GEMINI_API_KEY", "GEMINI_MODELS", "LLAMA_CPP_MODEL_PATH", "LLAMA_CPP_N_CTX", "LLAMA_CPP_N_THREADS",
       "LOCAL_LLM_BASE_URL", "LOCAL_LLM_MODEL", "LOCAL_LLM_API_KEY", "MITHI_TTS_URL", "MITHI_TTS_API_KEY",
+      "APPROVAL_TTL_SECONDS", "SHANAYA_PYTHON_SANDBOX_IMAGE", "SHANAYA_NODE_SANDBOX_IMAGE", "SHANAYA_SHELL_SANDBOX_IMAGE",
     ];
     const childEnv = Object.fromEntries(envAllowlist
       .filter((name) => process.env[name] !== undefined)
       .map((name) => [name, process.env[name]]));
     childEnv.SHANAYA_HOST = "127.0.0.1";
     childEnv.SHANAYA_PORT = "8000";
+    childEnv.NODE_ENV = app.isPackaged ? "production" : (process.env.NODE_ENV || "development");
     childEnv.SHANAYA_WORKSPACE = path.join(app.getPath("userData"), "workspace");
+    // Keep the append-only audit chain in the app's private writable data area,
+    // not beside packaged read-only application resources.
+    childEnv.SHANAYA_AUDIT_LOG = path.join(app.getPath("userData"), "logs", "shanaya_audit.jsonl");
 
     try {
       // Fixed module and arguments, shell disabled, and no process APIs exposed to the renderer.
@@ -243,7 +244,7 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createWindow();
   });
 }).catch((error) => {
-  // Backend optional startup must not prevent the desktop shell opening.
+  // A missing system Python/dependency must not prevent the desktop shell opening.
   console.error(`Shanaya desktop window could not start (${error?.code || error?.name || "startup error"}).`);
   app.quit();
 });

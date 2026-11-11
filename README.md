@@ -47,6 +47,7 @@ These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---You
 - [Voice and calls](#voice-and-calls)
 - [Mobile and PWA builds](#mobile-and-pwa-builds)
 - [API reference](#api-reference)
+- [API integration guide](./docs/API-INTEGRATION.md)
 - [Project structure](#project-structure)
 - [Development](#development)
 - [Testing and quality](#testing-and-quality)
@@ -328,7 +329,11 @@ python -m pip install -r backend/requirements.txt
 cp .env.example .env
 ```
 
-Set the Python fallback's provider key in the root `.env`, then start all three services with `npm run dev:with-python-fallback`. You can also run `npm run dev:python-fallback` separately. Set `VITE_PYTHON_FALLBACK_URL` in `client/.env` if the Python service is not at `http://127.0.0.1:8000`. This Python router has its own provider configuration and does not replace the Express server's primary Groq configuration. The optional `apps/desktop` Electron shell can start the Python process itself when launched with `SHANAYA_ENABLE_PYTHON_FALLBACK=true`; install `backend/requirements.txt` in the selected system Python environment first. Its child uses fixed arguments, a restricted environment, no shell, and no renderer process API.
+Set the Python fallback's provider key in the root `.env`, then start all three services with `npm run dev:with-python-fallback`. You can also run `npm run dev:python-fallback` separately. Set `VITE_PYTHON_FALLBACK_URL` in `client/.env` if the Python service is not at `http://127.0.0.1:8000`. This Python router has its own provider configuration and does not replace the Express server's primary Groq configuration. Install `backend/requirements.txt` in the selected Python environment and install the Playwright browser with `python -m playwright install chromium`; Docker must be available to run code. The `apps/desktop` shell starts the Python process by default and can be opted out with `SHANAYA_ENABLE_PYTHON_FALLBACK=false`. Its child uses fixed arguments, a restricted environment, no shell, and no renderer process API.
+
+In the Python agent, every registered tool—including read-only tools—requires explicit approval over its session-bound WebSocket. Proposals, decisions, expirations, and result fingerprints go to `logs/shanaya_audit.jsonl` (or `SHANAYA_AUDIT_LOG`); user payloads and credentials are redacted. The JSONL records form a hash chain that detects edits and truncation. Python tools are workspace-scoped, shell commands are allow-listed, web submissions require approval, and code runs in a network-disabled Docker container. The Python service binds only to localhost because it has no remote-user authentication.
+
+Kernel sensing is disabled unless explicitly enabled. On Linux with BCC and matching kernel headers installed, opt in with `sudo npm run dev:ebpf`; the loader forwards process/syscall metadata to the loopback API and never records file paths. It is optional and does not affect the rest of the application.
 
 ## Configuration
 
@@ -602,13 +607,13 @@ npm run preview --prefix client
 
 ### Avatar optimization
 
-The Draco pipeline compresses the source avatar and copies local decoder assets. The primary client loads the compressed model by default; the optional Python frontend points to the same generated asset:
+The Draco pipeline compresses the source avatar and copies local decoder assets. The primary client loads the compressed model by default. The Python-edition frontend serves the shared `client/public` assets and loads the supplied `uruha_rushia_-_hololive_vtuber.glb` directly:
 
 ```bash
 npm run models:draco --prefix client
 ```
 
-The current avatar source is `client/public/models/avatar.glb`; its compressed runtime asset is `client/public/models/avatar.draco.glb`. It includes a skin and an `Idle` animation, which the avatar plays alongside its responsive procedural movement. It has morph targets without semantic names, so emotion-specific facial morphs cannot be mapped yet; the UI still shows the emotion indicator and body pose.
+The supplied model is `client/public/models/uruha_rushia_-_hololive_vtuber.glb`. The avatar centers and scales its bounds for the available viewport, plays an idle animation when present, and safely ignores emotion morphs that the model does not define. The production client can use `avatar.draco.glb` for a smaller download.
 
 ## Deployment
 
@@ -717,6 +722,8 @@ Publish `client/dist` to a static host. Configure SPA fallback routing to serve 
 
 ## API reference
 
+For complete request/response examples, environment variables, error handling, frontend integration, MCP, TTS, Pinecall, and security guidance, read the [API integration guide](./docs/API-INTEGRATION.md).
+
 ### `GET /api/health`
 
 Returns:
@@ -792,6 +799,17 @@ Fetches credentials from the configured trusted Pinecall token issuer. It return
 │   ├── capacitor.config.ts           # Native app configuration
 │   ├── package.json                  # Client scripts/dependencies
 │   └── vite.config.ts                # Vite/PWA/proxy configuration
+├── apps/
+│   ├── frontend/                     # Python-edition React/R3F client
+│   ├── mobile/                       # Capacitor iOS and Android shell
+│   └── desktop/                      # Electron shell and restricted preload
+├── backend/
+│   ├── main.py                       # Bounded FastAPI agent and approval WebSocket
+│   ├── audit_logger.py               # Redacted hash-chained JSONL audit log
+│   └── tools/                        # Allow-listed tools and Docker code sandbox
+├── ebpf/
+│   ├── main.bpf.c                    # Metadata-only syscall sensor
+│   └── loader.py                     # Opt-in BCC loader
 ├── server/
 │   ├── .env.example                  # Server configuration template
 │   ├── index.js                     # Express API, agent router, desktop and TTS proxies
@@ -800,7 +818,7 @@ Fetches credentials from the configured trusted Pinecall token issuer. It return
 │   ├── mcp-stdio.mjs                # Local MCP stdio transport
 │   ├── mithi_tts_service.py         # Optional Charvi TTS service wrapper
 │   └── package.json                  # Server scripts/dependencies
-├── package.json                     # Root orchestration scripts
+├── package.json                     # Root scripts and apps/* npm workspaces
 ├── LICENSE                           # Source-available project license
 └── README.md
 ```
@@ -817,6 +835,8 @@ Fetches credentials from the configured trusted Pinecall token issuer. It return
 | `npm run dev:client` | Run only the Vite client. |
 | `npm run dev:server` | Run only the Express server. |
 | `npm run build` | Build and type-check the client. |
+| `npm run build:agent-frontend` | Build the React frontend in `apps/frontend`. |
+| `npm run dev:ebpf` | Opt in to the Linux eBPF metadata monitor. |
 
 #### Client
 

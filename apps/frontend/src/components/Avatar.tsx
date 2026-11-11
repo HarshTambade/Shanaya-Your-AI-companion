@@ -1,13 +1,13 @@
-import { Suspense, useEffect, useMemo, useRef } from "react";
+import { Component, Suspense, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Html, OrbitControls, useAnimations, useGLTF } from "@react-three/drei";
 import { DRACOLoader, SkeletonUtils } from "three-stdlib";
 import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
 import type { Emotion } from "../services/LLMRouter";
 
-const modelUrl = "/models/avatar.glb";
+const modelUrl = `${import.meta.env.BASE_URL}models/uruha_rushia_-_hololive_vtuber.glb`;
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath("/draco/");
+dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
 const emotionAliases: Record<Emotion, string[]> = {
   happy: ["happy", "smile", "joy"],
   sad: ["sad", "frown"],
@@ -16,6 +16,20 @@ const emotionAliases: Record<Emotion, string[]> = {
 };
 const emotionIcons: Record<Emotion, string> = { happy: "✨", sad: "💧", cute: "💗", neutral: "✦" };
 const cachedSceneUsers = new WeakMap<Group, number>();
+
+class AvatarLoadBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed
+      ? <Html center><span role="status" className="rounded-xl border border-white/10 bg-slate-950/85 px-4 py-3 text-center text-xs text-slate-200">Shanaya’s 3D model could not load. Check the model asset and refresh.</span></Html>
+      : this.props.children;
+  }
+}
 
 function cloneAvatarResources(scene: Group) {
   // useGLTF caches scenes globally. Clone per-instance GPU resources so unmount
@@ -101,6 +115,10 @@ function Model({ emotion }: { emotion: Emotion }) {
   // SkeletonUtils preserves skinned meshes and isolates this avatar from the
   // shared GLTF scene and other mounted instances.
   const avatar = useMemo(() => SkeletonUtils.clone(scene) as Group, [scene]);
+  const avatarResources = useMemo(() => ({
+    dispose: cloneAvatarResources(avatar),
+    disposeTimer: undefined as number | undefined,
+  }), [avatar]);
   const root = useRef<Group>(null);
   const model = useRef<Group>(null);
   const modelScaleInitialized = useRef(false);
@@ -136,7 +154,21 @@ function Model({ emotion }: { emotion: Emotion }) {
     });
   }, [emotion, avatar]);
 
-  useEffect(() => cloneAvatarResources(avatar), [avatar]);
+  useEffect(() => {
+    // React StrictMode replays effects in development. Defer disposal by one
+    // task and cancel it on remount so the replay cannot leave a live avatar
+    // holding already-disposed GPU resources.
+    if (avatarResources.disposeTimer !== undefined) {
+      window.clearTimeout(avatarResources.disposeTimer);
+      avatarResources.disposeTimer = undefined;
+    }
+    return () => {
+      avatarResources.disposeTimer = window.setTimeout(() => {
+        avatarResources.disposeTimer = undefined;
+        avatarResources.dispose();
+      }, 0);
+    };
+  }, [avatarResources]);
 
   useEffect(() => {
     const idleClip = stableAnimations.find((clip) => /idle|stand|breath/i.test(clip.name)) ?? stableAnimations[0];
@@ -205,9 +237,11 @@ export default function Avatar({ emotion }: { emotion: Emotion }) {
         <ambientLight intensity={1.7} />
         <directionalLight position={[3, 5, 4]} intensity={2.5} color="#fff2df" />
         <directionalLight position={[-4, 2, -3]} intensity={1.8} color="#a6a5ff" />
-        <Suspense fallback={<Html center><span className="text-xs text-slate-400">Preparing Shanaya…</span></Html>}>
-          <Model emotion={emotion} />
-        </Suspense>
+        <AvatarLoadBoundary>
+          <Suspense fallback={<Html center><span className="text-xs text-slate-400">Preparing Shanaya…</span></Html>}>
+            <Model emotion={emotion} />
+          </Suspense>
+        </AvatarLoadBoundary>
         <OrbitControls target={[0, 1.1, 0]} enablePan={false} enableDamping dampingFactor={0.08} minDistance={3.4} maxDistance={7.5} minPolarAngle={Math.PI / 3.4} maxPolarAngle={Math.PI / 1.9} />
       </Canvas>
     </div>

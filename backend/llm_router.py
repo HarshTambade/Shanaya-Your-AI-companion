@@ -15,11 +15,14 @@ from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 logger = logging.getLogger("shanaya.llm")
-ALLOWED_EMOTIONS = {"happy", "sad", "angry", "neutral", "surprised", "thinking"}
+ALLOWED_EMOTIONS = {"happy", "sad", "cute", "neutral"}
 DEFAULT_GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    # Graceful model-ID fallback for accounts where the requested Llama IDs
+    # have been retired or are unavailable on their Groq plan.
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "llama-3.1-8b-instant",
 ]
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -68,11 +71,10 @@ class LLMRouter:
         candidates: list[Candidate] = []
 
         if groq_key:
-            groq_models = _csv("GROQ_MODELS", ",".join(DEFAULT_GROQ_MODELS))
-            # Preserve the inexpensive Groq recovery model even when an operator
-            # customizes the primary model list.
-            if "llama-3.1-8b-instant" not in groq_models:
-                groq_models.append("llama-3.1-8b-instant")
+            # The requested Llama pair always stays first and in order. Any
+            # operator-specific models follow the built-in modern fallbacks.
+            configured_models = _csv("GROQ_MODELS")
+            groq_models = list(dict.fromkeys([*DEFAULT_GROQ_MODELS, *configured_models]))
             candidates.extend(Candidate(1, "Groq", model, groq_key, GROQ_BASE_URL) for model in groq_models)
 
         if openai_key:

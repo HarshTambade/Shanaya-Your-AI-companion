@@ -10,6 +10,7 @@ export default function App() {
   return (
     <main className="relative h-[100dvh] min-h-[440px] w-full overflow-hidden bg-[#080b14] text-slate-100">
       <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_50%_32%,rgba(113,82,255,0.2),transparent_58%)]" />
+      <div className="pointer-events-none absolute inset-0 z-0 bg-[url('/avatar-circuit-bg.svg')] bg-cover bg-center opacity-40" />
       <section className="absolute inset-0 z-[1]" aria-label="Shanaya's 3D avatar">
         <Avatar emotion={emotion} />
       </section>
