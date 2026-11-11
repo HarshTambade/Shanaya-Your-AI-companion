@@ -12,21 +12,23 @@
 
 Shanaya is a source-available AI companion built for natural conversation across web, mobile, and desktop environments. It combines a responsive React interface, a real-time 3D avatar, emotion-aware responses, multilingual voice interaction, cloud and local inference, and offline-capable native AI.
 
-> **Project status:** Active development. APIs, native integrations, model formats, and build workflows may change while the project matures.
+> **Project status:** Active development. [Release v1.0.2](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/tag/v1.0.2) provides Android, macOS, Windows, and Linux packages. An installable iOS IPA still requires Apple signing. The [QA audit](./docs/QA-AUDIT-2026-11-11.md) records the tested paths, known issues, and platform limits.
 
 ## Downloads
 
 <p>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Android APK downloads" src="https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/latest/download/Shanaya-Android.apk"><img alt="Android APK downloads" src="https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white"></a>
   <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="iOS TestFlight and App Store information" src="https://img.shields.io/badge/iOS-TestFlight%20%2F%20App%20Store-111111?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="macOS DMG downloads" src="https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Windows installer downloads" src="https://img.shields.io/badge/Windows-EXE-0078D4?logo=windows&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Linux package downloads" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/latest/download/Shanaya-macOS.dmg"><img alt="macOS DMG downloads" src="https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/latest/download/Shanaya-Windows.exe"><img alt="Windows installer downloads" src="https://img.shields.io/badge/Windows-EXE-0078D4?logo=windows&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/latest/download/Shanaya-Linux.AppImage"><img alt="Linux AppImage downloads" src="https://img.shields.io/badge/Linux-AppImage-FCC624?logo=linux&logoColor=black"></a>
 </p>
 
-These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. A normal build on `main` only creates temporary Actions artifacts, so the Releases page stays empty until the first release is published. To publish one without pushing a local tag, run the [Build Shanaya workflow](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml), enable **Publish the completed platform packages as a GitHub Release**, and enter a version such as `v1.0.0`. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`; blank values open Actions so you can download artifacts from a successful run.
+The current [GitHub Release](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/tag/v1.0.2) includes an Android APK, macOS DMG, Windows EXE, and Linux AppImage. Linux DEB output is optional and appears when the runner produces it. A normal build on `main` uploads temporary [Actions artifacts](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml); a `v*` tag or a manual workflow run with release publishing enabled creates a versioned release.
 
-**iOS note:** A signed build exports an IPA, but installing on iPhone or iPad still requires TestFlight, the App Store, or another Apple-approved distribution method. Without Apple signing credentials, CI provides an Xcode archive for developers instead.
+**iOS note:** Release v1.0.2 has no installable IPA because Apple signing is not configured. The release includes an installation note, and the workflow run stores the unsigned Xcode archive as an Actions artifact. Device installation requires a signed IPA distributed through TestFlight or the App Store.
+
+The in-app **Downloads** menu points to these latest release assets by default. Set `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, or `VITE_LINUX_DOWNLOAD_URL` to override a link with a store listing or another host.
 
 ## Contents
 
@@ -51,6 +53,7 @@ These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---You
 - [Project structure](#project-structure)
 - [Development](#development)
 - [Testing and quality](#testing-and-quality)
+- [QA audit report](./docs/QA-AUDIT-2026-11-11.md)
 - [Deployment](#deployment)
 - [Security and privacy](#security-and-privacy)
 - [Troubleshooting and FAQ](#troubleshooting-and-faq)
@@ -83,31 +86,94 @@ Shanaya is designed around a few principles that should guide new features:
 ## Architecture
 
 ```mermaid
-flowchart TD
-    User["User"] --> Surface{"Web / PWA / iOS / Android / Electron"}
-    Surface --> Client["Client service<br/>React + Vite"]
-    Client --> UI["ChatUI + agent runtime"]
-    Client --> Avatar["Three.js avatar"]
-    Client --> Local{"Local or offline route"}
-    Client --> Vercel["Vercel public routing"]
-    Vercel --> API["Server service<br/>Express API"]
-    MCPClient["MCP-capable apps"] --> MCP["Shanaya MCP<br/>stdio / Streamable HTTP"]
-    MCP --> API
-    Local --> WebLLM["WebLLM + WebGPU"]
-    Local --> Llama["llama.cpp + GGUF<br/>iOS / Android"]
-    Local --> NativeAgent["MobileClaw + LanceDB + MobileCron<br/>iOS / Android"]
-    API --> Cloud["OpenAI-compatible cloud API"]
-    API --> Ollama["Ollama"]
-    API --> TTS["Optional Mithi TTS"]
-    API --> Pinecall["Pinecall token issuer"]
-    Cloud --> Result["reply + emotion / tool calls"]
-    Ollama --> Result
-    WebLLM --> Result
-    Llama --> Result
-    NativeAgent --> Result
-    Result --> Client
-    Client --> Avatar
+flowchart TB
+    User["User"] --> Web["Web / PWA"]
+    User --> Mobile["iOS / Android<br/>Capacitor"]
+    User --> Desktop["macOS / Windows / Linux<br/>Capacitor Electron"]
+
+    subgraph Client["Shared client · client/src"]
+        UI["React UI<br/>landing · chat · integrations · downloads"]
+        Runtime["AgentRuntime<br/>up to 8 tool turns"]
+        Router{"LLMRouter<br/>network-aware provider selection"}
+        Guard["SafetyGuard<br/>approval boundary"]
+        Tools["DeviceTools<br/>allow-listed actions"]
+        Scene["AvatarScene<br/>Three.js · GLB · emotion"]
+        Voice["SpeechService / VoiceService<br/>recognition · synthesis · TalkMode"]
+        Native["Optional MobileClaw agent<br/>iOS / Android"]
+        Memory["LanceDB memory + MobileCron<br/>app-private native storage"]
+        UI --> Runtime
+        UI --> Scene
+        UI --> Voice
+        UI --> Native
+        Runtime --> Router
+        Runtime --> Guard --> Tools
+        Native --> Memory
+    end
+    Web --> UI
+    Mobile --> UI
+    Desktop --> UI
+
+    Router -->|browser / Electron local| WebLLM["WebLLM + WebGPU"]
+    Router -->|native offline model| GGUF["llama.cpp + GGUF<br/>iOS / Android"]
+    Router -->|cloud / Ollama| Edge
+    Tools -->|permissioned OS actions| OS["Device OS APIs"]
+    Native -->|native key configured| Anthropic["Anthropic API"]
+
+    subgraph Hosting["Vercel rewrites or separately hosted Express"]
+        Edge{"Incoming paths<br/>/ · /api/* · /mcp"}
+        SPA["Vite static app / PWA"]
+        API["Express API<br/>health · models · chat · agent"]
+        MCPHTTP["Optional Streamable HTTP MCP<br/>bearer-token protected"]
+        Edge -->|/| SPA
+        Edge -->|/api/*| API
+        Edge -->|/mcp when enabled| MCPHTTP
+        API --> Computer["Optional desktop computer endpoint"]
+        API --> VoiceAPI["TTS + Pinecall token endpoints"]
+    end
+    SPA -. serves .-> Web
+    SPA -. serves packaged web assets to .-> Mobile
+    SPA -. serves packaged web assets to .-> Desktop
+    API --> Cloud["Groq / OpenAI-compatible provider"]
+    API --> Ollama["Ollama host"]
+    API --> AnthropicComputer["Anthropic computer-use API"]
+    VoiceAPI --> Mithi["Optional Mithi TTS"]
+    VoiceAPI --> Pinecall["Pinecall token issuer + voice service"]
+    Voice -->|optional TTS request / call token| VoiceAPI
+    Voice -->|short-lived call session| Pinecall
+
+    subgraph MCP["MCP clients"]
+        Host["MCP host"] -->|HTTPS + bearer token| MCPHTTP
+        Stdio["Local stdio process"] --> MCPTools["Shanaya MCP tools"]
+        MCPHTTP --> MCPTools
+        MCPTools --> API
+    end
+
+    subgraph Python["Optional local Python service · backend/"]
+        FastAPI["FastAPI model-step fallback<br/>localhost only"]
+        PyProvider["Python-configured model provider"]
+        Standalone["Standalone Python tool agent"]
+        Approval["Approval WebSocket<br/>standalone Python tool flow"]
+        Audit["Redacted, hash-chained audit log"]
+        Sandbox["Docker code sandbox<br/>network disabled"]
+        Router -.->|retryable Express failure| FastAPI
+        FastAPI --> PyProvider -->|one model step| Router
+        Standalone --> Approval
+        Standalone --> Audit
+        Standalone --> Sandbox
+    end
 ```
+
+The main Android/iOS apps are Capacitor projects under [`client/android`](./client/android) and [`client/ios`](./client/ios). The released desktop packages wrap the same client in Capacitor Electron. [`apps/desktop`](./apps/desktop) is a separate Python-enabled Electron shell; it starts the local FastAPI service by default. The example bridge in `client/electron-agent` is an optional integration and is not the default desktop package path.
+
+### Message and tool flow
+
+1. ChatUI passes the request to `AgentRuntime`, which runs a bounded sequence of model and tool steps.
+2. `LLMRouter` chooses a provider. WebLLM runs in a supported browser/Electron renderer; native offline AI uses llama.cpp and a downloaded GGUF model; cloud and Ollama requests go through Express.
+3. Express validates and bounds requests, then calls the configured provider. On retryable Express failures, the client can request one model step from the optional loopback Python service. Local/native providers return their result directly.
+4. Any device action passes through `SafetyGuard` and `DeviceTools`; actions that require confirmation wait for the user's approval. Replies and emotion metadata return to ChatUI and AvatarScene.
+5. The optional native MobileClaw agent is a distinct path on iOS/Android. It uses its configured Anthropic credential and can store agent memory in app-private LanceDB storage.
+
+The diagram shows optional capabilities alongside the default request path. Native MobileClaw, remote MCP, Mithi TTS, Pinecall calls, desktop control and the Python fallback each require their respective configuration and permissions.
 
 ### Vercel service topology
 
@@ -128,15 +194,28 @@ The `client` service is public at `/`. The server handles `/api/*`; its `/mcp` r
 | --- | --- | --- |
 | Presentation | [`client/src/App.tsx`](./client/src/App.tsx) | Composes the avatar surface, branding, and chat experience. |
 | Chat orchestration | [`client/src/components/ChatUI.tsx`](./client/src/components/ChatUI.tsx) | Selects inference mode, shows tool activity/results, manages voice controls, errors, and model readiness. |
-| Agent runtime | [`client/src/services/AgentRuntime.ts`](./client/src/services/AgentRuntime.ts) and [`client/src/services/LLMRouter.ts`](./client/src/services/LLMRouter.ts) | Routes cloud/Ollama tool calls and runs a bounded agent loop for local inference. |
+| Agent runtime and routing | [`client/src/services/AgentRuntime.ts`](./client/src/services/AgentRuntime.ts) and [`client/src/services/LLMRouter.ts`](./client/src/services/LLMRouter.ts) | Runs up to eight tool turns and selects cloud, Ollama, Python fallback, WebLLM, or native offline inference. |
 | Safety and device tools | [`client/src/services/DeviceTools.ts`](./client/src/services/DeviceTools.ts) and [`client/src/services/SafetyGuard.ts`](./client/src/services/SafetyGuard.ts) | Provides confirmed device actions and the user approval boundary. |
-| Native agent | [`client/src/services/MobileAgent.ts`](./client/src/services/MobileAgent.ts) | Initializes MobileClaw, local LanceDB memory, and MobileCron on iOS/Android. |
+| Native agent | [`client/src/services/MobileAgent.ts`](./client/src/services/MobileAgent.ts) | Initializes optional MobileClaw, local LanceDB memory, and MobileCron on iOS/Android. |
 | Avatar rendering | [`client/src/components/AvatarScene.tsx`](./client/src/components/AvatarScene.tsx) | Loads the GLB model, applies emotion morphs/poses, and renders the Three.js scene. |
 | AI services | [`client/src/services/AIService.ts`](./client/src/services/AIService.ts) | Handles native GGUF download, llama.cpp initialization, offline generation, and network-aware routing. |
 | Speech services | [`client/src/services/SpeechService.ts`](./client/src/services/SpeechService.ts) and [`client/src/services/VoiceService.ts`](./client/src/services/VoiceService.ts) | Provides speech synthesis and speech recognition integrations. |
-| API boundary | [`server/index.js`](./server/index.js) | Validates chat requests, calls cloud/Ollama providers, normalizes model output, and issues Pinecall token requests. |
-| Integration boundary | [`server/mcp-core.mjs`](./server/mcp-core.mjs), [`server/mcp-http.mjs`](./server/mcp-http.mjs), and [`server/mcp-stdio.mjs`](./server/mcp-stdio.mjs) | Exposes Shanaya to MCP clients over local stdio or token-protected Streamable HTTP. |
+| API boundary | [`server/index.js`](./server/index.js) | Provides health/model, chat/agent, TTS, Pinecall token, and optional desktop computer endpoints; calls configured providers. |
+| MCP integration | [`server/mcp-core.mjs`](./server/mcp-core.mjs), [`server/mcp-http.mjs`](./server/mcp-http.mjs), and [`server/mcp-stdio.mjs`](./server/mcp-stdio.mjs) | Exposes Shanaya tools to local stdio clients or token-protected Streamable HTTP clients. |
+| Optional Python service | [`backend/main.py`](./backend/main.py) | Provides a localhost model-step fallback and an approval-gated standalone tool flow with audit logging and a Docker sandbox. |
+| Alternate desktop shell | [`apps/desktop`](./apps/desktop) | Runs the separate Python-enabled Electron shell; it is distinct from the Capacitor Electron release packages. |
 | Packaging | [`client/capacitor.config.ts`](./client/capacitor.config.ts) and [`client/vite.config.ts`](./client/vite.config.ts) | Defines native app identity, PWA behavior, caching, and development proxying. |
+
+### Runtime data and trust boundaries
+
+| Data or credential | Where it goes | Persistence / boundary |
+| --- | --- | --- |
+| Visitor-provided Groq key | Client sends it in `X-Groq-API-Key` to the Express API, which forwards it to Groq over HTTPS. | Held in client memory for the page session; not stored by Shanaya. |
+| Server provider keys | Express process to its configured provider. | Server environment only; never put in `VITE_*` variables. |
+| Native MobileClaw Anthropic credential | Native plugin to Anthropic when the optional native agent is used. | Managed by the native plugin; separate from the Express cloud route. |
+| Chat and agent messages | Chosen local runtime or Express/provider route. | No conversation database is configured by the server; local history behavior depends on the client/runtime. |
+| Local model and agent memory | WebLLM browser storage, or app-private native GGUF/LanceDB storage. | Stored by the relevant browser or operating system sandbox. |
+| API access | Public Express endpoints, subject to request validation and configured CORS. | CORS controls browser origins; it is not user authentication or rate limiting. See the [QA audit](./docs/QA-AUDIT-2026-11-11.md) for current exposure findings. |
 
 ## How a message works
 
@@ -341,17 +420,17 @@ Kernel sensing is disabled unless explicitly enabled. On Linux with BCC and matc
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | Only for a separate API origin | Base URL for `/api/chat` and `/api/pinecall/token`. Leave empty when using the Vite proxy. |
+| `VITE_API_BASE_URL` | Only for a separate API origin | Base URL for API requests, including `/api/agent`, `/api/chat`, `/api/tts`, and `/api/pinecall/token`. Leave empty when using the Vite proxy or same-origin Vercel rewrites. |
 | `VITE_PYTHON_FALLBACK_URL` | No | Optional FastAPI standby URL for agent model steps; Express remains primary. |
 | `VITE_PINECALL_AGENT_ID` | Only for Pinecall | Public Pinecall agent slug. |
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
 | `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default is the compressed `/models/avatar.draco.glb`. |
 | `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
-| `VITE_ANDROID_DOWNLOAD_URL` | No | Optional Android installer URL; blank opens the GitHub Actions build page. |
-| `VITE_IOS_DOWNLOAD_URL` | No | Optional App Store/TestFlight URL; blank opens the GitHub Actions build page. |
-| `VITE_MACOS_DOWNLOAD_URL` | No | Optional macOS installer URL; blank opens the GitHub Actions build page. |
-| `VITE_WINDOWS_DOWNLOAD_URL` | No | Optional Windows installer URL; blank opens the GitHub Actions build page. |
-| `VITE_LINUX_DOWNLOAD_URL` | No | Optional Linux package URL; blank opens the GitHub Actions build page. |
+| `VITE_ANDROID_DOWNLOAD_URL` | No | Optional Android installer or store URL; blank uses the latest GitHub release APK. |
+| `VITE_IOS_DOWNLOAD_URL` | No | Optional App Store/TestFlight URL; blank opens GitHub Releases because the current release has no signed IPA. |
+| `VITE_MACOS_DOWNLOAD_URL` | No | Optional macOS installer URL; blank uses the latest GitHub release DMG. |
+| `VITE_WINDOWS_DOWNLOAD_URL` | No | Optional Windows installer URL; blank uses the latest GitHub release EXE. |
+| `VITE_LINUX_DOWNLOAD_URL` | No | Optional Linux package URL; blank uses the latest GitHub release AppImage. |
 
 ### Server environment: `server/.env`
 
@@ -546,16 +625,16 @@ For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS 
 
 ### Build artifacts and installation
 
-The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build publishes a GitHub Release with stable platform package names. A manual run can also publish one by enabling the release input and providing a `vMAJOR.MINOR.PATCH` tag. A normal `main` build does not create a release:
+The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Successful `v*` tag builds publish a GitHub Release with stable platform package names. A manual run can also publish one by enabling the release input and providing a `vMAJOR.MINOR.PATCH` tag. A normal `main` build uploads temporary Actions artifacts and does not create a release. Release [v1.0.2](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases/tag/v1.0.2) currently contains the following downloadable packages:
 
 | Platform | Release asset | Format and installation notes |
 | --- | --- | --- |
-| Android | `Shanaya-Android.apk` | APK. The workflow uses release signing only when Android signing secrets are configured; otherwise it creates a debug APK. |
-| iOS | `Shanaya-iOS.ipa` | Exported only when Apple signing is configured. iOS installation still requires TestFlight, the App Store, or another approved distribution method. Unsigned Xcode archives remain available as workflow artifacts. |
-| macOS | `Shanaya-macOS.dmg` | Electron installer. Code signing and notarization depend on Apple credentials. |
-| Windows | `Shanaya-Windows.exe` | Electron installer. Authenticode signing depends on configured credentials. |
-| Linux | `Shanaya-Linux.AppImage`, `Shanaya-Linux.deb` | Electron AppImage and/or DEB packages from the Linux runner. |
-| Web/PWA | Actions artifact `shanaya-web-pwa` | Static `dist` bundle. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
+| Android | `Shanaya-Android.apk` | Available in v1.0.2. CI uses release signing only when Android signing secrets are configured; otherwise it creates a debug APK. |
+| iOS | No IPA in v1.0.2; `iOS-Installation.txt` | Apple signing is not configured. The unsigned Xcode archive is a workflow artifact, not a device-installable app. A signed IPA requires Apple credentials and distribution through TestFlight or the App Store. |
+| macOS | `Shanaya-macOS.dmg` | Available in v1.0.2. Electron installer; signing and notarization depend on Apple credentials. |
+| Windows | `Shanaya-Windows.exe` | Available in v1.0.2. Electron installer; Authenticode signing depends on configured credentials. |
+| Linux | `Shanaya-Linux.AppImage` | Available in v1.0.2. A DEB package may also be produced by the Linux runner, but is not included in the current release. |
+| Web/PWA | Actions artifact `shanaya-web-pwa` | Static `dist` bundle from a workflow run. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
 
 Create and push a version tag to build and publish installers:
 
@@ -566,7 +645,7 @@ git push origin v1.0.3
 
 Alternatively, open **Actions → Build Shanaya → Run workflow**, select the branch to build, enable **Publish the completed platform packages as a GitHub Release**, and enter a new version tag such as `v1.0.3`. The release job creates that tag at the selected workflow commit and attaches the generated packages.
 
-For development builds, use the [Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) and download artifacts from a successful run.
+For development builds or the unsigned iOS archive, use the [Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) and download artifacts from a successful run.
 
 The in-app Downloads menu links to the latest Android and desktop installers on GitHub Releases by default. iOS opens the release notes because an installable IPA requires Apple signing and TestFlight or App Store distribution. Set platform URL variables in `client/.env` to point to store listings or another installer host. Vite embeds these links at build time, so rebuild the client after changing them.
 
@@ -883,7 +962,9 @@ Run server commands with `npm run <command> --prefix server`.
 
 ## Testing and quality
 
-The repository currently provides a production build/type-check command rather than a dedicated automated test suite.
+The repository currently provides a production build/type-check command rather than a dedicated unit, component, or browser end-to-end test suite. The [QA audit report](./docs/QA-AUDIT-2026-11-11.md) documents the latest checks across the primary client/PWA, Express API, Python source, Electron entry points, native project metadata, CI packaging, and current release assets.
+
+The audit recorded a conditional pass for the primary web/API build and release packaging. It also found provider-backed API routes without application-level authentication or rate limits, 75 production dependency advisories in the client graph (6 critical, 27 high, 42 moderate), a TypeScript error in the separate `apps/frontend` build, and no physical-device smoke tests. Cloud model, Ollama, TTS, Pinecall, and Anthropic provider calls were not made during the API smoke checks. See the report for evidence, limits, and remediation priorities.
 
 Before opening a pull request:
 
@@ -901,6 +982,8 @@ Manually verify:
 - Avatar emotion changes after an assistant response.
 - Speech permissions and voice failures are surfaced to the user.
 - No secret appears in the client bundle or committed files.
+
+The automated build and API smoke results above are not a substitute for a device install. In particular, the current iOS release has no signed IPA, and the audit did not exercise permissions, speech, calls, app resume, or offline model downloads on physical devices.
 
 ### Recommended future test layers
 
