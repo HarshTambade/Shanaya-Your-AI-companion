@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b14" />
+    <meta name="description" content="__SHANAYA_PAGE_DESCRIPTION__" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- SHANAYA_SEO_TAGS -->
+    <title>__SHANAYA_PAGE_TITLE__</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #080b14; color: #eef0fa; font-synthesis: none; text-rendering: optimizeLegibility; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; background: radial-gradient(ellipse at 18% 5%, rgba(117, 94, 255, .2), transparent 38rem), #080b14; }
+      a { color: #c4b5fd; text-underline-offset: .22em; }
+      a:hover { color: #e9ddff; }
+      .wrap { width: min(100% - 2rem, 68rem); margin: auto; }
+      header { height: 5rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.08); }
+      .brand { display: inline-flex; align-items: center; gap: .8rem; color: inherit; font-weight: 750; letter-spacing: .13em; text-decoration: none; }
+      .brand img { width: 2.5rem; height: 2.5rem; }
+      nav { display: flex; align-items: center; gap: 1.2rem; font-size: .88rem; }
+      .button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.8rem; border: 1px solid rgba(196,181,253,.35); border-radius: .9rem; padding: .7rem 1rem; color: #f2edff; background: rgba(139,92,246,.19); font-weight: 650; text-decoration: none; }
+      main { padding: clamp(3rem, 9vw, 7rem) 0 4rem; }
+      .eyebrow { color: #c4b5fd; font-size: .75rem; font-weight: 700; letter-spacing: .19em; text-transform: uppercase; }
+      h1 { max-width: 52rem; margin: 1rem 0; font-size: clamp(2.5rem, 7vw, 5.2rem); line-height: 1.04; letter-spacing: -.055em; }
+      h2 { margin: 0 0 .75rem; font-size: clamp(1.35rem, 3vw, 1.9rem); letter-spacing: -.025em; }
+      h3 { margin: 0 0 .5rem; font-size: 1rem; }
+      p { color: #aeb6ca; line-height: 1.75; }
+      .lead { max-width: 48rem; font-size: clamp(1.05rem, 2.4vw, 1.25rem); }
+      .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.8rem; }
+      .secondary { display: inline-flex; align-items: center; min-height: 2.8rem; padding: .65rem .4rem; }
+      .section { margin-top: clamp(3.5rem, 8vw, 6rem); }
+      .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1.4rem; }
+      .card { border: 1px solid rgba(255,255,255,.09); border-radius: 1.1rem; padding: 1.25rem; background: rgba(16,21,34,.72); }
+      .card p { margin-bottom: 0; font-size: .93rem; }
+      .note { border-left: 2px solid #a78bfa; padding: .2rem 0 .2rem 1rem; }
+      .faq { border-top: 1px solid rgba(255,255,255,.09); }
+      details { border-bottom: 1px solid rgba(255,255,255,.09); padding: 1rem 0; }
+      summary { cursor: pointer; font-weight: 650; }
+      footer { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; border-top: 1px solid rgba(255,255,255,.08); padding: 1.5rem 0 2.5rem; color: #8f98af; font-size: .85rem; }
+      @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } nav { gap: .75rem; font-size: .8rem; } .hide-small { display: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="/" aria-label="Shanaya home">
+          <img src="/icon.svg" alt="" width="40" height="40" />
+          <span>SHANAYA</span>
+        </a>
+        <nav aria-label="Main navigation">
+          <a class="hide-small" href="#features">Features</a>
+          <a class="hide-small" href="#privacy">Privacy</a>
+          <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-">Source</a>
+          <a class="button" href="/">Open Shanaya</a>
+        </nav>
+      </header>
+
+      <main>
+        <section aria-labelledby="page-title">
+          <p class="eyebrow">AI companion · 3D avatar · voice chat</p>
+          <h1 id="page-title">Meet Shanaya, an AI companion with a living 3D avatar</h1>
+          <p class="lead">Shanaya brings conversation, expressive avatar animation, and voice interaction together in one responsive web app. Choose Groq-powered cloud replies or use supported local AI options when you want inference on your own device.</p>
+          <div class="actions">
+            <a class="button" href="/">Start a conversation</a>
+            <a class="secondary" href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-">Explore the source code</a>
+          </div>
+        </section>
+
+        <section id="features" class="section" aria-labelledby="features-title">
+          <p class="eyebrow">Built for natural interaction</p>
+          <h2 id="features-title">A voice-enabled AI companion for web, mobile, and desktop</h2>
+          <div class="grid">
+            <article class="card">
+              <h3>Emotion-aware 3D avatar</h3>
+              <p>Shanaya’s React Three Fiber avatar uses model responses to animate supported expressions and idle movement, with a layout that adapts to desktop and mobile screens.</p>
+            </article>
+            <article class="card">
+              <h3>Multilingual voice chat</h3>
+              <p>Use English, Hindi, or Marathi speech options where the browser or device provides compatible speech recognition and voice playback.</p>
+            </article>
+            <article class="card">
+              <h3>Cloud and optional local AI</h3>
+              <p>Groq is the default cloud route. The project also supports configured providers, browser WebLLM, and native llama.cpp models on supported mobile devices.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="privacy" class="section" aria-labelledby="privacy-title">
+          <p class="eyebrow">Understand the data path</p>
+          <h2 id="privacy-title">Choose how Shanaya processes your messages</h2>
+          <p>In cloud mode, conversation content is sent through the configured Shanaya API to the selected AI provider to generate a reply. Provider privacy and retention terms apply. Optional local inference can keep prompts on the device after its model is available. Shanaya does not claim that cloud requests are offline or zero-retention.</p>
+          <p class="note">Supported device actions use explicit confirmation prompts. Availability is limited by the operating system and app permissions; Shanaya does not have unrestricted control over every device or application.</p>
+        </section>
+
+        <section class="section" aria-labelledby="platform-title">
+          <p class="eyebrow">One companion, multiple shells</p>
+          <h2 id="platform-title">Use Shanaya in a browser or install a supported app</h2>
+          <p>The project includes a React web app and PWA, with Capacitor builds for Android and iOS and an Electron desktop shell. Native installation packages are published on GitHub Releases after a versioned build; iOS distribution requires Apple signing and an approved distribution channel.</p>
+          <div class="actions">
+            <a class="button" href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases">View app releases</a>
+            <a class="secondary" href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml">Browse build artifacts</a>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="faq-title">
+          <p class="eyebrow">Common questions</p>
+          <h2 id="faq-title">About Shanaya</h2>
+          <div class="faq">
+            <details>
+              <summary>Does Shanaya work offline?</summary>
+              <p>Optional offline inference is available with WebLLM in supported browsers and with a downloaded GGUF model in supported iOS and Android apps. First-time model downloads require an internet connection.</p>
+            </details>
+            <details>
+              <summary>Which languages can I use for voice interaction?</summary>
+              <p>The interface offers English, Hindi, and Marathi language choices. Speech recognition and speech synthesis depend on the voices and capabilities available in your browser or operating system.</p>
+            </details>
+            <details>
+              <summary>Can Shanaya control my device?</summary>
+              <p>Only the supported actions exposed by the current app are available. Sensitive actions require confirmation, and operating system permissions or restrictions still apply.</p>
+            </details>
+            <details>
+              <summary>Is Shanaya a medical or emergency service?</summary>
+              <p>No. Shanaya is software and is not a replacement for emergency services or professional medical, legal, or financial advice.</p>
+            </details>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <span>Shanaya is an actively developed, source-available AI companion project.</span>
+        <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/blob/main/LICENSE">Read the project license</a>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,19 +1,26 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { mobileClawVitePlugin } from "capacitor-mobile-claw/vite-plugin";
+import { shanayaSeoPlugin } from "./scripts/seoPlugin";
 
-export default defineConfig({
+const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mobileClawVitePlugin(),
+    shanayaSeoPlugin({ mode }),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icon.svg"],
+      includeAssets: ["icon.svg", "social-card.svg"],
       manifest: {
+        id: "/",
         name: "Shanaya · AI Companion",
         short_name: "Shanaya",
-        description: "A private, multilingual AI companion.",
+        description: "A multilingual AI companion with a living 3D avatar, voice chat, and optional on-device AI.",
         theme_color: "#080b14",
         background_color: "#080b14",
         display: "standalone",
@@ -34,10 +41,18 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(projectRoot, "index.html"),
+        about: resolve(projectRoot, "about/index.html"),
+      },
+    },
+  },
   server: {
     host: "0.0.0.0",
     proxy: {
       "/api": "http://localhost:3001",
     },
   },
-});
+}));

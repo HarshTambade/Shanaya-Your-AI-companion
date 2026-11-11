@@ -611,6 +611,17 @@ The current avatar source is `client/public/models/avatar.glb`; its compressed r
 
 ## Deployment
 
+### Search engine optimization
+
+The production client includes a crawlable `/about/` page and build-time SEO metadata for the home page:
+
+- Canonical URLs, `hreflang`, robots directives, descriptive titles, and search descriptions.
+- Open Graph and Twitter large-image cards using [`social-card.svg`](./client/public/social-card.svg).
+- Schema.org JSON-LD for the website, publisher, software application, and homepage FAQ.
+- Production-only `robots.txt` and `sitemap.xml` covering `/` and `/about/`.
+
+Set `VITE_SITE_URL` to the final public HTTPS origin before deploying. On Vercel, the build can also use the production project domain automatically; an explicit custom-domain value is preferred for stable canonical URLs. SEO cannot guarantee a first-place ranking: useful content, performance, accessibility, legitimate backlinks, and regular updates also affect search visibility.
+
 The client and API are separate deployable units:
 
 ```text

@@ -70,7 +70,12 @@ export default function App() {
               <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-200/70">Companion interface</p>
               <h1 className="mt-0.5 font-['Manrope'] text-base font-semibold text-white sm:text-lg">Conversation</h1>
             </div>
-            <PlatformDownloads />
+            <div className="flex shrink-0 items-center gap-2">
+              <a href="/about/" className="rounded-lg px-2 py-2 text-[11px] text-slate-400 transition hover:bg-white/[0.04] hover:text-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/50">
+                About
+              </a>
+              <PlatformDownloads />
+            </div>
           </header>
           <div className="min-h-0 flex-1">
             <ChatUI panel onEmotionChange={setEmotion} />
