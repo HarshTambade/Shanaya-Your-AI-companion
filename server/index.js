@@ -9,6 +9,18 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173,capa
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const localDevelopmentHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const corsOrigin = (origin, callback) => {
+  if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      if (localDevelopmentHosts.has(new URL(origin).hostname)) return callback(null, true);
+    } catch {
+      // Invalid Origin values are rejected below.
+    }
+  }
+  return callback(null, false);
+};
 const defaultGroqApiUrl = "https://api.groq.com/openai/v1/chat/completions";
 const cloudApiUrl = process.env.GROQ_API_URL || process.env.CLOUD_API_URL || defaultGroqApiUrl;
 const isGroqProvider = cloudApiUrl.startsWith("https://api.groq.com/");
@@ -50,11 +62,22 @@ const systemPrompt = [
 ].join(" ");
 const allowedEmotions = new Set(["happy", "sad", "angry", "neutral", "surprised", "thinking"]);
 
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: "12mb" }));
 
+if (process.env.NODE_ENV !== "production") {
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api/")) return next();
+    const startedAt = Date.now();
+    res.on("finish", () => {
+      console.info(`[api] ${req.method} ${req.path} -> ${res.statusCode} (${Date.now() - startedAt}ms)`);
+    });
+    next();
+  });
+}
+
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", provider: cloudProvider, ready: Boolean(cloudApiKey && cloudModels.length) });
 });
 
 app.get("/api/models", (_req, res) => {

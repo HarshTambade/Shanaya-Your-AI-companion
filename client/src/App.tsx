@@ -23,7 +23,7 @@ export default function App() {
       <div className="soft-grid pointer-events-none absolute inset-0 z-0 opacity-60" />
       <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_24%_44%,rgba(86,67,190,0.22),transparent_44%),radial-gradient(ellipse_at_78%_18%,rgba(20,184,166,0.06),transparent_34%)]" />
 
-      <div className="relative z-[1] grid h-full min-h-0 grid-cols-1 grid-rows-[minmax(0,0.43fr)_minmax(0,0.57fr)] lg:grid-cols-[minmax(340px,0.88fr)_minmax(500px,1.12fr)] lg:grid-rows-1">
+      <div className="relative z-[1] grid h-full min-h-0 grid-cols-1 grid-rows-[minmax(0,0.43fr)_minmax(0,0.57fr)] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-1">
         <section className="relative min-h-0 overflow-hidden border-b border-white/[0.07] bg-[#0a0d17]/65 lg:border-b-0 lg:border-r" aria-label="Shanaya avatar">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_48%,rgba(117,94,255,0.16),transparent_58%)]" />
 

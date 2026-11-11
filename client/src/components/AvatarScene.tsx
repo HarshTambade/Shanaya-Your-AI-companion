@@ -102,7 +102,9 @@ function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?
     const viewHeight = 2 * 5.4 * Math.tan((perspectiveCamera.fov * Math.PI) / 360);
     const aspect = size.width / Math.max(1, size.height);
     const viewWidth = viewHeight * aspect;
-    const heightFraction = Math.min(0.84, 900 / Math.max(1, size.height));
+    // The canvas sits between the avatar header and status cards, so let the model
+    // use most of that available area while preserving a small safety margin.
+    const heightFraction = Math.min(0.92, 980 / Math.max(1, size.height));
     const heightLimit = viewHeight * heightFraction;
     const widthLimit = viewWidth * 0.78 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
     const fitScale = Math.min(heightLimit, widthLimit) / Math.max(framing.sourceHeight, 0.001);
@@ -175,8 +177,12 @@ export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emot
           enablePan={false}
           enableDamping
           dampingFactor={0.08}
-          minDistance={3.4}
-          maxDistance={7}
+          // Keep the face oriented toward the conversation while still allowing
+          // a small amount of interactive viewing and zoom.
+          minAzimuthAngle={-Math.PI / 7}
+          maxAzimuthAngle={Math.PI / 7}
+          minDistance={4.8}
+          maxDistance={6.2}
           minPolarAngle={Math.PI / 3.4}
           maxPolarAngle={Math.PI / 1.9}
         />

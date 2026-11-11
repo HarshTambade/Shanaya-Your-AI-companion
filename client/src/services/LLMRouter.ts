@@ -48,12 +48,23 @@ function normalizeStep(data: any): AgentStep {
 }
 
 async function requestAgentStep(url: string, body: Record<string, unknown>): Promise<AgentStep> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(90_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new AgentApiError(
+      timedOut
+        ? "The AI request timed out while waiting for the API server. Check the server terminal and Groq model access."
+        : `Could not reach the AI API at ${url}. Start the server with npm run dev from the project root.`,
+      timedOut ? 408 : undefined,
+    );
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof data.error === "string" ? data.error : typeof data.detail === "string" ? data.detail : "The agent service could not complete the request.";

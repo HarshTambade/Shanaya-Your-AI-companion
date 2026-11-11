@@ -86,6 +86,8 @@ type ChatUIProps = {
   panel?: boolean;
 };
 
+type ApiStatus = "checking" | "connected" | "offline" | "misconfigured";
+
 export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [input, setInput] = useState("");
@@ -93,6 +95,7 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
   const [cloudModels, setCloudModels] = useState<string[]>([]);
   const [cloudModel, setCloudModel] = useState("");
   const [cloudProvider, setCloudProvider] = useState("Groq");
+  const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
   const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>("en-US");
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
     try {
@@ -137,11 +140,15 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
 
   useEffect(() => {
     let active = true;
-    void fetch(apiUrl("/api/models"))
-      .then(async (response) => response.ok ? response.json() : null)
-      .then((data) => {
-        if (!active || !data || !Array.isArray(data.models)) return;
+    const loadApiStatus = async () => {
+      try {
+        const response = await fetch(apiUrl("/api/models"), { signal: AbortSignal.timeout(5_000) });
+        if (!response.ok) throw new Error(`API returned HTTP ${response.status}.`);
+        const data = await response.json();
+        if (!active || !Array.isArray(data.models)) return;
+
         const models = data.models.filter((model: unknown): model is string => typeof model === "string" && model.length > 0);
+        setApiStatus(models.length ? "connected" : "misconfigured");
         setCloudModels(models);
         if (typeof data.provider === "string" && data.provider) setCloudProvider(data.provider);
         let storedModel: string | null = null;
@@ -150,13 +157,22 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
         } catch {
           storedModel = null;
         }
-        const initialModel = models.includes(storedModel || "")
-          ? storedModel!
-          : models.includes(data.defaultModel) ? data.defaultModel : models[0] || "";
-        setCloudModel(initialModel);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
+        setCloudModel((currentModel) => models.includes(currentModel)
+          ? currentModel
+          : models.includes(storedModel || "")
+            ? storedModel!
+            : models.includes(data.defaultModel) ? data.defaultModel : models[0] || "");
+      } catch {
+        if (active) setApiStatus("offline");
+      }
+    };
+
+    void loadApiStatus();
+    const retryTimer = window.setInterval(() => void loadApiStatus(), 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(retryTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -425,12 +441,20 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
         <div className="flex min-w-0 items-center gap-3">
           <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-300/20 bg-violet-400/[0.1] text-violet-200">
             <Bot size={17} />
-            <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[#111521] ${isOnline ? "bg-emerald-400" : "bg-amber-300"}`} />
+            <span className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[#111521] ${isOnline && (effectiveMode !== "cloud" || apiStatus === "connected") ? "bg-emerald-400" : "bg-amber-300"}`} />
           </div>
           <div className="min-w-0">
             <h1 className="truncate font-['Manrope'] text-sm font-bold text-slate-100">Shanaya</h1>
             <p className="truncate text-[10px] text-slate-400">
-              {!isOnline ? `Offline · ${selectedMode.label}` : selectedMode.label}
+              {!isOnline
+                ? `Offline · ${selectedMode.label}`
+                : effectiveMode === "cloud" && apiStatus === "offline"
+                  ? "API server unavailable"
+                  : effectiveMode === "cloud" && apiStatus === "misconfigured"
+                    ? "Add a Groq API key on the server"
+                    : effectiveMode === "cloud" && apiStatus === "checking"
+                      ? "Connecting to the API…"
+                      : selectedMode.label}
               {isCallConnected ? ` · call ${formatDuration(call.duration)}` : ""}
             </p>
           </div>
@@ -586,6 +610,17 @@ export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) 
       {!isOnline && (
         <div className="flex shrink-0 items-center gap-2 border-b border-amber-200/10 bg-amber-200/[0.05] px-4 py-2 text-[10px] font-medium text-amber-100/80">
           <LockKeyhole size={12} /> Offline mode · AI requests stay on this device
+        </div>
+      )}
+
+      {effectiveMode === "cloud" && apiStatus === "offline" && (
+        <div role="alert" className="shrink-0 border-b border-rose-300/10 bg-rose-300/[0.05] px-4 py-2 text-[10px] leading-relaxed text-rose-100/80">
+          Shanaya’s API server is not reachable. From the project root, run <code className="text-rose-100">npm run dev</code> to start the API and client together. The app will retry automatically.
+        </div>
+      )}
+      {effectiveMode === "cloud" && apiStatus === "misconfigured" && (
+        <div role="alert" className="shrink-0 border-b border-amber-200/10 bg-amber-200/[0.05] px-4 py-2 text-[10px] leading-relaxed text-amber-100/80">
+          The API server is online, but no cloud models are configured. Add <code className="text-amber-100">GROQ_API_KEY</code> to <code className="text-amber-100">server/.env</code> and restart the server.
         </div>
       )}
 
