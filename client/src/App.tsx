@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Aperture, House } from "lucide-react";
+import { Aperture, Cable, House } from "lucide-react";
 import AvatarScene, { type AvatarMotion } from "./components/AvatarScene";
 import ChatUI from "./components/ChatUI";
+import IntegrationsPage from "./components/IntegrationsPage";
 import LandingPage from "./components/LandingPage";
 import PlatformDownloads from "./components/PlatformDownloads";
 import type { Emotion } from "./types";
@@ -16,13 +17,25 @@ const emotionColors: Record<Emotion, string> = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState<"landing" | "companion">("landing");
+  // A fresh visit to the root URL always starts on the landing page. Companion
+  // access is a deliberate in-session transition from its Talk to Shanaya CTA.
+  const [screen, setScreen] = useState<"landing" | "companion" | "integrations">("landing");
+  const [integrationReturnScreen, setIntegrationReturnScreen] = useState<"landing" | "companion">("landing");
   const [groqApiKey, setGroqApiKey] = useState("");
   const [emotion, setEmotion] = useState<Emotion>("neutral");
   const [motion, setMotion] = useState<AvatarMotion>("loading");
 
+  if (screen === "integrations") {
+    return <IntegrationsPage onBack={() => setScreen(integrationReturnScreen)} />;
+  }
+
   if (screen === "landing") {
-    return <LandingPage onStart={(apiKey) => { setGroqApiKey(apiKey); setScreen("companion"); }} />;
+    return (
+      <LandingPage
+        onStart={(apiKey) => { setGroqApiKey(apiKey); setScreen("companion"); }}
+        onIntegrations={() => { setIntegrationReturnScreen("landing"); setScreen("integrations"); }}
+      />
+    );
   }
 
   return (
@@ -86,6 +99,13 @@ export default function App() {
               <h1 className="mt-0.5 font-['Manrope'] text-base font-semibold text-white sm:text-lg">Conversation</h1>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setIntegrationReturnScreen("companion"); setScreen("integrations"); }}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-[10px] text-slate-400 transition hover:bg-white/[0.04] hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50"
+              >
+                <Cable size={13} /> <span className="hidden sm:inline">Integrations</span>
+              </button>
               <a href="/about/" className="rounded-lg px-2 py-2 text-[11px] text-slate-400 transition hover:bg-white/[0.04] hover:text-violet-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300/50">
                 About
               </a>

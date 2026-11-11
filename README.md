@@ -65,6 +65,7 @@ These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---You
 - **Multilingual voice:** speech recognition and speech playback support English (`en-US`), Hindi (`hi-IN`), and Marathi (`mr-IN`), subject to platform availability.
 - **One codebase, multiple surfaces:** run as a Vite web app/PWA, a Capacitor iOS or Android app, or a Capacitor Electron desktop app.
 - **Secret-safe key handling:** server credentials stay on the server and never enter `VITE_*`; a visitor's Groq key stays in page memory and is sent only in a request header to the app API.
+- **Visible integrations:** the app includes an API and MCP guide with endpoint summaries, a copyable REST example, and a local MCP client configuration.
 - **Accessible responsive UI:** mobile safe areas, keyboard-friendly controls, status messages, and responsive layouts are built into the client.
 
 ## Product principles

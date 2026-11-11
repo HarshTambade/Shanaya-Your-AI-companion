@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from "react";
 import {
-  ArrowDown, ArrowRight, AudioLines, Eye, EyeOff, Globe2, Heart, LockKeyhole,
+  ArrowDown, ArrowRight, AudioLines, Cable, Eye, EyeOff, Globe2, Heart, LockKeyhole,
   MessageCircle, Mic2, ShieldCheck, Sparkles, X,
 } from "lucide-react";
 import AvatarScene from "./AvatarScene";
 
-type LandingPageProps = { onStart: (groqApiKey: string) => void };
+type LandingPageProps = { onStart: (groqApiKey: string) => void; onIntegrations: () => void };
 
 const highlights = [
   {
@@ -25,7 +25,7 @@ const highlights = [
   },
 ];
 
-export default function LandingPage({ onStart }: LandingPageProps) {
+export default function LandingPage({ onStart, onIntegrations }: LandingPageProps) {
   const [keyDialogOpen, setKeyDialogOpen] = useState(false);
   const [groqApiKey, setGroqApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -89,6 +89,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
             <a href="#experience" className="text-xs text-slate-400 transition hover:text-white">The experience</a>
             <a href="#how-it-works" className="text-xs text-slate-400 transition hover:text-white">How it works</a>
             <a href="#privacy" className="text-xs text-slate-400 transition hover:text-white">Your privacy</a>
+            <button type="button" onClick={onIntegrations} className="text-xs text-slate-400 transition hover:text-white">Integrations</button>
             <a href="/about/" className="text-xs text-slate-400 transition hover:text-white">About</a>
           </nav>
 
@@ -134,6 +135,10 @@ export default function LandingPage({ onStart }: LandingPageProps) {
                 Discover the experience <ArrowDown size={13} />
               </a>
             </div>
+
+            <button type="button" onClick={onIntegrations} className="mt-3 inline-flex items-center gap-2 text-left text-[10px] font-medium text-slate-500 transition hover:text-cyan-100">
+              <Cable size={13} /> Connect Shanaya to another app with the API or MCP
+            </button>
 
             <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/[0.07] pt-5 text-[10px] text-slate-500">
               <span className="inline-flex items-center gap-2"><ShieldCheck size={13} className="text-cyan-200/70" /> Your key, your choice</span>
@@ -234,7 +239,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
         <footer className="border-t border-white/[0.06]">
           <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-6 text-[9px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-12">
             <span>© {new Date().getFullYear()} Shanaya · A thoughtful AI companion.</span>
-            <div className="flex items-center gap-5"><a href="/about/" className="transition hover:text-slate-200">About</a><a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-" target="_blank" rel="noreferrer" className="transition hover:text-slate-200">Source & project details</a></div>
+            <div className="flex items-center gap-5"><button type="button" onClick={onIntegrations} className="transition hover:text-slate-200">API & Integrations</button><a href="/about/" className="transition hover:text-slate-200">About</a><a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-" target="_blank" rel="noreferrer" className="transition hover:text-slate-200">Source & project details</a></div>
           </div>
         </footer>
       </div>
