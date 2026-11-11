@@ -1,6 +1,6 @@
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
+import { Html, useAnimations, useGLTF, useProgress } from "@react-three/drei";
 import { AnimationClip, Box3, BufferGeometry, Group, Material, MathUtils, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
 import { DRACOLoader, SkeletonUtils } from "three-stdlib";
 import type { Emotion } from "../types";
@@ -38,8 +38,6 @@ dracoLoader.setDecoderPath(`${publicBaseUrl}draco/`);
 const configuredAvatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim();
 const avatarModelUrl = configuredAvatarModelUrl || `${publicBaseUrl}models/uruha_rushia_-_hololive_vtuber.glb`;
 const uncompressedAvatarModelUrl = `${publicBaseUrl}models/avatar.glb`;
-// The skinned character is slightly right of the static GLB bounds; keep it centered as it scales.
-const avatarHorizontalCenterCorrection = 2.3;
 const cachedSceneUsers = new WeakMap<Group, number>();
 
 export type AvatarMotion = "loading" | "animation" | "procedural" | "error";
@@ -237,11 +235,14 @@ function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMot
     const heightLimit = viewHeight * heightFraction;
     const widthLimit = viewWidth * 0.78 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
     const fitScale = Math.min(heightLimit, widthLimit) / Math.max(framing.sourceHeight, 0.001);
-    avatar.position.x = Math.sin(time * 0.42) * 0.095;
+    // Keep the character's center fixed. The previous lateral sway and broad
+    // yaw made this tall model appear to travel across the entire stage.
+    avatar.position.x = 0;
     const fittedAvatarHeight = fitScale * framing.sourceHeight;
-    avatar.position.y = 1.1 - fittedAvatarHeight / 2 - fittedAvatarHeight * 0.08 + Math.sin(time * 1.25) * 0.075 + pose.bounce * pulse;
+    avatar.position.y = 1.1 - fittedAvatarHeight / 2 + Math.sin(time * 1.25) * 0.045 + pose.bounce * pulse;
     avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.52) * 0.045, 3.5, delta);
-    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.34) * 0.19, 2.8, delta);
+    const subtleTurn = MathUtils.clamp(pose.turn * 0.2 + Math.sin(time * 0.34) * 0.025, -0.06, 0.06);
+    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, subtleTurn, 2.8, delta);
     avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.68) * 0.045, 3.5, delta);
     const scale = 1 + (emotion === "surprised" ? 0.035 : 0.012) * pulse;
     avatar.scale.setScalar(MathUtils.damp(avatar.scale.x, scale, 4, delta));
@@ -251,7 +252,7 @@ function Avatar({ emotion, onMotionChange, modelUrl }: { emotion: Emotion; onMot
       // offset in the same scaled coordinate space, or the avatar lands far
       // outside the camera frustum while its animation still appears active.
       modelGroup.position.set(
-        (framing.position[0] - avatarHorizontalCenterCorrection) * fitScale,
+        framing.position[0] * fitScale,
         framing.position[1] * fitScale,
         framing.position[2] * fitScale,
       );
@@ -318,6 +319,7 @@ export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emot
         gl={{ alpha: true, antialias: true }}
         onCreated={({ gl, camera }) => {
           gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          gl.setClearColor("#000000", 0);
           camera.position.set(0, 1.1, 5.4);
           camera.lookAt(0, 1.1, 0);
           camera.updateProjectionMatrix();
@@ -336,20 +338,6 @@ export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emot
             <Avatar emotion={emotion} onMotionChange={onMotionChange} modelUrl={modelUrl} />
           </Suspense>
         </AvatarLoadBoundary>
-        <OrbitControls
-          target={[0, 1.1, 0]}
-          enablePan={false}
-          enableDamping
-          dampingFactor={0.08}
-          // Keep the face oriented toward the conversation while still allowing
-          // a small amount of interactive viewing and zoom.
-          minAzimuthAngle={-Math.PI / 7}
-          maxAzimuthAngle={Math.PI / 7}
-          minDistance={4.8}
-          maxDistance={6.2}
-          minPolarAngle={Math.PI / 3.4}
-          maxPolarAngle={Math.PI / 1.9}
-        />
       </Canvas>
     </div>
   );

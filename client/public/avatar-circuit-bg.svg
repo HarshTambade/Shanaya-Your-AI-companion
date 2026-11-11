@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 740 360" fill="none">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="740" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071a3a"/>
+      <stop offset=".52" stop-color="#0a2148"/>
+      <stop offset="1" stop-color="#071936"/>
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="0" cy="0" r="1" gradientTransform="matrix(0 204 -285 0 370 180)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0c2854" stop-opacity=".86"/>
+      <stop offset="1" stop-color="#071a38" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trace" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#0069ef"/>
+      <stop offset=".52" stop-color="#087ce9"/>
+      <stop offset="1" stop-color="#00b8ff"/>
+    </linearGradient>
+    <filter id="softGlow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="wideGlow" x="-100%" y="-100%" width="300%" height="300%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <g id="leftTraces" stroke="url(#trace)" stroke-linecap="round" stroke-linejoin="round">
+      <g opacity=".78" stroke-width="1.15">
+        <path d="M0 0h31l24 24v31l34 34h79v28h58"/>
+        <path d="M0 34h18l24 24v24l30 30h96v23h58"/>
+        <path d="M0 70h13l20 19v20h101v20h91"/>
+        <path d="M0 107h17l17 16v19h107v12h84"/>
+        <path d="M0 159h141v-17h83"/>
+        <path d="M0 183h156v-20h70"/>
+        <path d="M0 216h142v-17h66v-20h20"/>
+        <path d="M0 250h94v-20h73v-23h61"/>
+        <path d="M7 289h72v-29h75v-28h75"/>
+        <path d="M25 360v-23h60v-29h69v-28h75"/>
+        <path d="M160 360v-29h35v-26h33v-36h8"/>
+        <path d="M204 360v-26h27v-28h20v-57"/>
+        <path d="M178 0v62h25v40h25v30"/>
+        <path d="M142 0v21h30v21h36v70h22"/>
+        <path d="M108 0v31h41v22h38v42h35"/>
+        <path d="M221 0v49h19v66"/>
+      </g>
+      <g opacity=".42" stroke-width=".75">
+        <path d="M0 19h9l25 25v25l38 38h81"/>
+        <path d="M0 92h21v20l28 28h91"/>
+        <path d="M0 200h129v-17h27"/>
+        <path d="M0 270h75v-21h57v-22h46"/>
+        <path d="M48 360v-14h49v-31h61v-29"/>
+        <path d="M191 360v-20h29v-39"/>
+      </g>
+    </g>
+    <g id="leftNodes" fill="#078bff">
+      <circle cx="5" cy="162" r="2.5"/><circle cx="18" cy="285" r="2.6"/>
+      <circle cx="87" cy="59" r="2.4"/><circle cx="86" cy="144" r="2.4"/>
+      <circle cx="124" cy="204" r="2.5"/><circle cx="176" cy="23" r="2.5"/>
+      <circle cx="208" cy="235" r="2.5"/><circle cx="221" cy="11" r="2.3"/>
+      <circle cx="242" cy="236" r="2.5"/>
+    </g>
+  </defs>
+
+  <path fill="url(#base)" d="M0 0h740v360H0z"/>
+  <path fill="url(#centerGlow)" d="M0 0h740v360H0z"/>
+
+  <use href="#leftTraces"/>
+  <use href="#leftTraces" transform="translate(740) scale(-1 1)"/>
+
+  <path fill="#081b3b" fill-opacity=".48" d="m370 76 130 75v75l-130 75-130-75v-75z"/>
+  <g stroke="#0878ee" stroke-width="1.05" opacity=".76" stroke-linejoin="round">
+    <path d="m370 76 130 75v75l-130 75-130-75v-75z"/>
+    <path d="m370 88 119 69v63l-119 69-119-69v-63z" opacity=".88"/>
+    <path d="m370 101 107 62v49l-107 62-107-62v-49z" opacity=".79"/>
+    <path d="m370 114 96 55v35l-96 55-96-55v-35z" opacity=".69"/>
+    <path d="m370 127 85 49v21l-85 49-85-49v-21z" opacity=".58"/>
+  </g>
+
+  <g fill="#00a5ff" filter="url(#wideGlow)" opacity=".8">
+    <circle cx="87" cy="59" r="4"/><circle cx="86" cy="144" r="4"/><circle cx="124" cy="204" r="4"/>
+    <circle cx="176" cy="23" r="4"/><circle cx="208" cy="235" r="4"/><circle cx="242" cy="236" r="4"/>
+    <circle cx="5" cy="162" r="4"/><circle cx="18" cy="285" r="4"/>
+  </g>
+  <use href="#leftNodes" filter="url(#softGlow)"/>
+  <use href="#leftNodes" transform="translate(740) scale(-1 1)" filter="url(#softGlow)"/>
+  <g fill="#13aaff" filter="url(#softGlow)">
+    <circle cx="242" cy="11" r="2.4"/><circle cx="298" cy="54" r="2.5"/>
+    <circle cx="364" cy="33" r="2.8"/><circle cx="422" cy="67" r="2.3"/>
+    <circle cx="494" cy="104" r="2.5"/><circle cx="538" cy="72" r="2.4"/>
+    <circle cx="604" cy="57" r="2.6"/><circle cx="652" cy="29" r="2.4"/>
+    <circle cx="483" cy="236" r="2.7"/><circle cx="527" cy="236" r="2.6"/>
+    <circle cx="616" cy="204" r="2.5"/><circle cx="654" cy="142" r="2.6"/>
+    <circle cx="722" cy="161" r="2.4"/><circle cx="721" cy="285" r="2.6"/>
+  </g>
+</svg>
