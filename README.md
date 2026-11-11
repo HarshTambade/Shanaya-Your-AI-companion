@@ -17,18 +17,16 @@ Shanaya is a source-available AI companion built for natural conversation across
 ## Downloads
 
 <p>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Android APK build" src="https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="iOS build information" src="https://img.shields.io/badge/iOS-TestFlight%20%2F%20App%20Store-111111?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="macOS DMG build" src="https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Windows installer build" src="https://img.shields.io/badge/Windows-EXE-0078D4?logo=windows&logoColor=white"></a>
-  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml"><img alt="Linux package build" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Android APK downloads" src="https://img.shields.io/badge/Android-APK-3DDC84?logo=android&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="iOS TestFlight and App Store information" src="https://img.shields.io/badge/iOS-TestFlight%20%2F%20App%20Store-111111?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="macOS DMG downloads" src="https://img.shields.io/badge/macOS-DMG-555555?logo=apple&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Windows installer downloads" src="https://img.shields.io/badge/Windows-EXE-0078D4?logo=windows&logoColor=white"></a>
+  <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Linux package downloads" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
 </p>
 
-These links open the [GitHub Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml). Open a successful run and download its platform artifact. The in-app **Downloads** menu supports direct installer URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`.
+These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`.
 
-**iOS note:** CI produces an Xcode archive, not a directly installable IPA. iPhone and iPad installation requires a signed App Store or TestFlight build. The iOS button links to build information and does not bypass Apple signing or distribution.
-
-> Builds are currently available as workflow artifacts. A tagged GitHub Release is not created automatically.
+**iOS note:** A signed build exports an IPA, but installing on iPhone or iPad still requires TestFlight, the App Store, or another Apple-approved distribution method. Without Apple signing credentials, CI provides an Xcode archive for developers instead.
 
 ## Contents
 
@@ -334,11 +332,11 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | `VITE_OFFLINE_MODEL_URL` | Only for native offline AI | HTTPS URL of a downloadable GGUF model. |
 | `VITE_AVATAR_MODEL_URL` | No | Optional avatar asset path. The default is the compressed `/models/avatar.draco.glb`. |
 | `VITE_SHANAYA_ANTHROPIC_MODEL` | No | Model ID for the optional native MobileClaw agent. |
-| `VITE_ANDROID_DOWNLOAD_URL` | No | Direct Android installer URL in the Downloads menu; defaults to the Actions build page. |
-| `VITE_IOS_DOWNLOAD_URL` | No | App Store/TestFlight or signed iOS distribution page; defaults to the Actions build page. |
-| `VITE_MACOS_DOWNLOAD_URL` | No | Direct macOS installer URL; defaults to the Actions build page. |
-| `VITE_WINDOWS_DOWNLOAD_URL` | No | Direct Windows installer URL; defaults to the Actions build page. |
-| `VITE_LINUX_DOWNLOAD_URL` | No | Direct Linux package URL; defaults to the Actions build page. |
+| `VITE_ANDROID_DOWNLOAD_URL` | No | Optional Android installer URL; defaults to the GitHub Releases page. |
+| `VITE_IOS_DOWNLOAD_URL` | No | Optional App Store/TestFlight URL; defaults to the GitHub Releases page. |
+| `VITE_MACOS_DOWNLOAD_URL` | No | Optional macOS installer URL; defaults to the GitHub Releases page. |
+| `VITE_WINDOWS_DOWNLOAD_URL` | No | Optional Windows installer URL; defaults to the GitHub Releases page. |
+| `VITE_LINUX_DOWNLOAD_URL` | No | Optional Linux package URL; defaults to the GitHub Releases page. |
 
 ### Server environment: `server/.env`
 
@@ -497,18 +495,27 @@ For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS 
 
 ### Build artifacts and installation
 
-The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Open a successful workflow run and download the matching artifact:
+The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build also publishes a GitHub Release with stable platform package names:
 
-| Platform | Artifact name | Format and installation notes |
+| Platform | Release asset | Format and installation notes |
 | --- | --- | --- |
-| Android | `shanaya-android` | APK. The workflow uses release signing only when Android signing secrets are configured; otherwise it creates a debug APK. |
-| iOS | `shanaya-ios-archive` | Xcode archive for signing/export. It is not a ready-to-install IPA; distribute through TestFlight or the App Store. |
-| macOS | `shanaya-electron-macos-15` | Electron installer output. Code signing and notarization depend on Apple credentials. |
-| Windows | `shanaya-electron-windows-2022` | Electron installer output. Authenticode signing depends on configured credentials. |
-| Linux | `shanaya-electron-ubuntu-24.04` | Electron installer output from the Linux runner. |
+| Android | `Shanaya-Android.apk` | APK. The workflow uses release signing only when Android signing secrets are configured; otherwise it creates a debug APK. |
+| iOS | `Shanaya-iOS.ipa` | Exported only when Apple signing is configured. iOS installation still requires TestFlight, the App Store, or another approved distribution method. Unsigned Xcode archives remain available as workflow artifacts. |
+| macOS | `Shanaya-macOS.dmg` | Electron installer. Code signing and notarization depend on Apple credentials. |
+| Windows | `Shanaya-Windows.exe` | Electron installer. Authenticode signing depends on configured credentials. |
+| Linux | `Shanaya-Linux.AppImage`, `Shanaya-Linux.deb` | Electron AppImage and/or DEB packages from the Linux runner. |
 | Web/PWA | `shanaya-web-pwa` | Static `dist` bundle. Deploy to HTTPS static hosting or preview with `npm run preview --prefix client`. |
 
-The in-app Downloads menu opens the Actions workflow by default. Set the platform URL variables in `client/.env` to point to stable release pages, store listings, or direct installers. Vite embeds these links at build time, so rebuild the client after changing them.
+Create and push a version tag to build and publish installers:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The in-app Downloads menu opens the Releases page by default. Set platform URL variables in `client/.env` to point to store listings or direct installer URLs when desired. Vite embeds these links at build time, so rebuild the client after changing them.
+
+To export a signed iOS IPA, configure the repository variable `IOS_SIGNING_ENABLED=true` and GitHub Actions secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `APPLE_TEAM_ID`, `APPSTORE_ISSUER_ID`, `APPSTORE_API_KEY_ID`, and `APPSTORE_API_PRIVATE_KEY`. For a device-installable iOS app, distribute the signed build through TestFlight or the App Store.
 
 ### CI build safeguards
 
@@ -517,7 +524,8 @@ The GitHub Actions workflow in [`.github/workflows/build.yml`](./.github/workflo
 - **Web/PWA:** installs with lifecycle scripts disabled, generates the Draco avatar, and uploads `shanaya-web-pwa`.
 - **Electron:** generates the Capacitor Electron project, vendors runtime plugins, and ignores invalid directory-valued certificate settings so unsigned builds can still complete when signing secrets are absent.
 - **Android:** installs SDK 36, NDK 29, and CMake 3.22.1; applies the Kotlin Gradle patch after Capacitor generates the native project; uploads debug or signed release APKs.
-- **iOS:** applies the native-agent zlib linker patch before project generation, adds privacy and speech permission metadata, archives the generated Xcode project/workspace, and uploads an Xcode archive.
+- **iOS:** applies the native-agent zlib linker patch before project generation, adds privacy and speech permission metadata, archives the generated Xcode project/workspace, and exports an IPA when Apple signing is configured.
+- **Releases:** on `v*` tags, gathers the Android, iOS, macOS, Windows, and Linux outputs and attaches their install packages to a GitHub Release. The release job has `contents: write` permission; other build jobs remain read-only.
 
 The native patch scripts modify only dependency files under `client/node_modules`; they are not source changes to the third-party packages and are rerun after clean installs.
 

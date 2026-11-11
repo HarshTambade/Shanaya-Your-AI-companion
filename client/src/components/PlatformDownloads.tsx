@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Download, ExternalLink } from "lucide-react";
 
-const workflowUrl = "https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml";
+const releasesUrl = "https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases";
 
 const platforms = [
-  { name: "Android", artifact: "shanaya-android", packageType: "APK", href: import.meta.env.VITE_ANDROID_DOWNLOAD_URL },
-  { name: "iOS", artifact: "shanaya-ios-archive", packageType: "App Store / TestFlight", href: import.meta.env.VITE_IOS_DOWNLOAD_URL },
-  { name: "macOS", artifact: "shanaya-electron-macos-15", packageType: "DMG", href: import.meta.env.VITE_MACOS_DOWNLOAD_URL },
-  { name: "Windows", artifact: "shanaya-electron-windows-2022", packageType: "EXE", href: import.meta.env.VITE_WINDOWS_DOWNLOAD_URL },
-  { name: "Linux", artifact: "shanaya-electron-ubuntu-24.04", packageType: "AppImage / DEB", href: import.meta.env.VITE_LINUX_DOWNLOAD_URL },
+  { name: "Android", packageType: "APK · latest release", href: import.meta.env.VITE_ANDROID_DOWNLOAD_URL },
+  { name: "iOS", packageType: "Signed IPA · TestFlight / App Store", href: import.meta.env.VITE_IOS_DOWNLOAD_URL },
+  { name: "macOS", packageType: "DMG · latest release", href: import.meta.env.VITE_MACOS_DOWNLOAD_URL },
+  { name: "Windows", packageType: "EXE · latest release", href: import.meta.env.VITE_WINDOWS_DOWNLOAD_URL },
+  { name: "Linux", packageType: "AppImage / DEB · latest release", href: import.meta.env.VITE_LINUX_DOWNLOAD_URL },
 ];
 
 export default function PlatformDownloads() {
@@ -40,7 +40,7 @@ export default function PlatformDownloads() {
               <a
                 key={platform.name}
                 role="menuitem"
-                href={platform.href?.trim() || workflowUrl}
+                href={platform.href?.trim() || releasesUrl}
                 target="_blank"
                 rel="noreferrer"
                 onClick={() => setIsOpen(false)}
@@ -49,7 +49,7 @@ export default function PlatformDownloads() {
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-slate-100">Download for {platform.name}</span>
                   <span className="mt-0.5 block truncate text-[10px] text-slate-500">
-                    {platform.href?.trim() ? platform.packageType : `${platform.artifact} · ${platform.packageType}`}
+                    {platform.packageType}
                   </span>
                 </span>
                 <ExternalLink size={13} className="shrink-0 text-slate-500" />
@@ -57,7 +57,7 @@ export default function PlatformDownloads() {
             ))}
           </div>
           <p className="mt-2 border-t border-white/[0.07] px-2 pt-2 text-[10px] leading-relaxed text-slate-500">
-            Without a direct download URL, buttons open GitHub Actions. Open the latest successful run and download the named artifact. iOS builds require signing and App Store or TestFlight distribution before installing on a device.
+            Platform builds are attached to GitHub Releases when a version tag is published. iOS requires Apple signing and TestFlight or App Store distribution; unsigned CI builds are archives only.
           </p>
         </div>
       )}

@@ -211,8 +211,11 @@ jobs:
           api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
       - name: Archive iOS app
+        env:
+          IOS_SIGNING_ENABLED: ${{ vars.IOS_SIGNING_ENABLED }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ "${{ vars.IOS_SIGNING_ENABLED }}" = "true" ]; then
+          if [ "$IOS_SIGNING_ENABLED" = "true" ]; then
             SIGNING_ALLOWED=YES
           else
             SIGNING_ALLOWED=NO
@@ -233,9 +236,123 @@ jobs:
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/Shanaya.xcarchive" \
             CODE_SIGNING_ALLOWED="$SIGNING_ALLOWED" \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             archive
+      - name: Export signed iOS IPA
+        if: vars.IOS_SIGNING_ENABLED == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/Shanaya.xcarchive" \
+            -exportPath "$RUNNER_TEMP/ios-export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
       - uses: actions/upload-artifact@v4
         with:
           name: shanaya-ios-archive
-          path: ${{ runner.temp }}/Shanaya.xcarchive
+          path: |
+            ${{ runner.temp }}/Shanaya.xcarchive
+            ${{ runner.temp }}/ios-export/*.ipa
+
+  release:
+    name: Publish release installers
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [electron, android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shanaya-*
+          path: release-input
+          merge-multiple: false
+      - name: Stage platform installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+
+          find_file() {
+            local root="$1"
+            local pattern="$2"
+            local exclude="${3:-}"
+            if [ -n "$exclude" ]; then
+              find "$root" -type f -iname "$pattern" ! -path "$exclude" -print -quit
+            else
+              find "$root" -type f -iname "$pattern" -print -quit
+            fi
+          }
+
+          copy_required() {
+            local root="$1"
+            local pattern="$2"
+            local destination="$3"
+            local exclude="${4:-}"
+            local source
+            source="$(find_file "$root" "$pattern" "$exclude")"
+            if [ -z "$source" ]; then
+              echo "Missing release package: $pattern under $root" >&2
+              exit 1
+            fi
+            cp "$source" "release-assets/$destination"
+          }
+
+          copy_required release-input/shanaya-android '*.apk' 'Shanaya-Android.apk'
+          copy_required release-input/shanaya-electron-macos-15 '*.dmg' 'Shanaya-macOS.dmg'
+          copy_required release-input/shanaya-electron-windows-2022 '*.exe' 'Shanaya-Windows.exe' '*/win-unpacked/*'
+
+          linux_appimage="$(find_file release-input/shanaya-electron-ubuntu-24.04 '*.AppImage')"
+          linux_deb="$(find_file release-input/shanaya-electron-ubuntu-24.04 '*.deb')"
+          if [ -z "$linux_appimage" ] && [ -z "$linux_deb" ]; then
+            echo 'Missing Linux AppImage and DEB release packages' >&2
+            exit 1
+          fi
+          if [ -n "$linux_appimage" ]; then
+            cp "$linux_appimage" release-assets/Shanaya-Linux.AppImage
+          fi
+          if [ -n "$linux_deb" ]; then
+            cp "$linux_deb" release-assets/Shanaya-Linux.deb
+          fi
+
+          ios_ipa="$(find_file release-input/shanaya-ios-archive '*.ipa')"
+          if [ -n "$ios_ipa" ]; then
+            cp "$ios_ipa" release-assets/Shanaya-iOS.ipa
+          else
+            cat > release-assets/iOS-Installation.txt <<'NOTICE'
+          This build does not include an installable iOS package because Apple signing is not configured.
+          Set the IOS_SIGNING_ENABLED repository variable and the Apple signing/App Store Connect secrets
+          described in README.md, then publish a new version tag. iOS installation requires TestFlight
+          or App Store distribution.
+          NOTICE
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Shanaya $GITHUB_REF_NAME"
+          fi
