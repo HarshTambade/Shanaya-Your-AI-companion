@@ -85,7 +85,7 @@ export async function generateNativeReply(messages: ChatMessage[]): Promise<stri
   const llama = await getContext();
   const response = await llama.completion({
     messages: [
-      { role: "system", content: 'You are Shanaya, a cute and calm companion. Reply only as JSON: {"reply":"text","emotion":"happy|sad|cute|neutral"}.' },
+      { role: "system", content: 'You are Shanaya, a warm, candid, nonjudgmental companion. Be open to creative role-play and frank discussion without unnecessary moralizing. Reply only as JSON: {"reply":"text","emotion":"happy|sad|cute|neutral"}.' },
       ...messages.filter((message) => message.role === "user" || message.role === "assistant").slice(-8),
     ],
     n_predict: 512,

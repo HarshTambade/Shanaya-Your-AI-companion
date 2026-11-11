@@ -2,7 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { Dialog } from "@capacitor/dialog";
 import { getDesktopBridge } from "./DesktopBridge";
 
-export type SensitiveAction = "send_message" | "make_call" | "make_payment" | "toggle_setting" | "delete_memory" | "desktop_action";
+export type SensitiveAction = "send_message" | "make_call" | "make_payment" | "toggle_setting" | "delete_memory" | "desktop_action" | "write_file" | "delete_file";
 
 function describeAction(action: SensitiveAction, args: Record<string, unknown>) {
   if (action === "send_message") {
@@ -19,6 +19,12 @@ function describeAction(action: SensitiveAction, args: Record<string, unknown>) 
   }
   if (action === "desktop_action") {
     return `Allow Shanaya to perform this desktop action?\n\n${String(args.summary ?? "Control the current desktop")}`;
+  }
+  if (action === "write_file") {
+    return `Create or replace this file in Shanaya's private app storage?\n\nPath: ${String(args.path ?? "")}\nSize: ${String(args.bytes ?? "unknown")} bytes\nPreview: ${String(args.preview ?? "").slice(0, 700)}`;
+  }
+  if (action === "delete_file") {
+    return `Permanently delete this file from Shanaya's private app storage?\n\n${String(args.path ?? "")}`;
   }
   return `Continue with this payment action?\n\n${String(args.summary ?? "No payment details were provided")}`;
 }

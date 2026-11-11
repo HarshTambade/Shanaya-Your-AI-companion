@@ -1,6 +1,8 @@
 import { AppLauncher } from "@capacitor/app-launcher";
 import { Capacitor } from "@capacitor/core";
 import { Device } from "@capacitor/device";
+import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
+import { Network } from "@capacitor/network";
 import type { DeviceTool as MobileClawTool } from "capacitor-mobile-claw";
 import { SafetyGuard } from "./SafetyGuard";
 
@@ -14,11 +16,93 @@ export type ShanayaTool = {
   name: string;
   description: string;
   inputSchema: ToolSchema;
-  sensitive?: "send_message" | "make_call" | "toggle_setting";
+  sensitive?: "send_message" | "make_call" | "toggle_setting" | "write_file" | "delete_file";
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 };
 
 const deviceTools: ShanayaTool[] = [
+  {
+    name: "list_app_files",
+    description: "List files and directories in Shanaya's private app Documents area. This cannot access other apps or arbitrary device paths.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Optional relative folder path; omit to list the app Documents root." } },
+    },
+    execute: async (args) => {
+      const path = safeDocumentPath(args.path, true);
+      const result = await Filesystem.readdir({ path, directory: Directory.Data });
+      return {
+        path: path || ".",
+        totalEntries: result.files.length,
+        truncated: result.files.length > 200,
+        files: result.files.slice(0, 200).map(({ name, type, size }) => ({ name, type, size })),
+      };
+    },
+  },
+  {
+    name: "read_app_file",
+    description: "Read a UTF-8 text file up to 128 KB from Shanaya's private app Documents area. Cloud-mode file contents are sent to the selected model provider.",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Relative path inside Shanaya's app Documents area." } },
+      required: ["path"],
+    },
+    execute: async (args) => {
+      const path = safeDocumentPath(args.path);
+      const stat = await Filesystem.stat({ path, directory: Directory.Data });
+      if (stat.type !== "file") throw new Error("Only files can be read.");
+      if (stat.size > 128_000) throw new Error("The file exceeds the 128 KB read limit.");
+      const { data } = await Filesystem.readFile({ path, directory: Directory.Data, encoding: Encoding.UTF8 });
+      const content = typeof data === "string" ? data : await data.text();
+      return { path, content };
+    },
+  },
+  {
+    name: "write_app_file",
+    description: "Create or replace a UTF-8 text file up to 1 MB inside Shanaya's private app Documents area. Always requires user confirmation.",
+    sensitive: "write_file",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative path inside Shanaya's app Documents area." },
+        content: { type: "string", description: "Exact UTF-8 text content to write." },
+      },
+      required: ["path", "content"],
+    },
+    execute: async (args) => {
+      const path = safeDocumentPath(args.path);
+      if (typeof args.content !== "string") throw new Error("File content must be text.");
+      const bytes = new TextEncoder().encode(args.content).byteLength;
+      if (bytes > 1_000_000) throw new Error("The file exceeds the 1 MB write limit.");
+      await SafetyGuard.require("write_file", { path, bytes, preview: args.content });
+      await Filesystem.writeFile({
+        path,
+        data: args.content,
+        directory: Directory.Data,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      });
+      return { ok: true, path, bytesWritten: bytes };
+    },
+  },
+  {
+    name: "delete_app_file",
+    description: "Delete a file from Shanaya's private app Documents area. Directories and paths outside app storage are not allowed. Always requires user confirmation.",
+    sensitive: "delete_file",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Relative file path inside Shanaya's app Documents area." } },
+      required: ["path"],
+    },
+    execute: async (args) => {
+      const path = safeDocumentPath(args.path);
+      const stat = await Filesystem.stat({ path, directory: Directory.Data });
+      if (stat.type !== "file") throw new Error("Directories cannot be deleted with this tool.");
+      await SafetyGuard.require("delete_file", { path });
+      await Filesystem.deleteFile({ path, directory: Directory.Data });
+      return { ok: true, path, deleted: true };
+    },
+  },
   {
     name: "open_app",
     description: "Open a supported app or public web page. Use make_call for a phone number and send_message for a text draft.",
@@ -125,6 +209,22 @@ const deviceTools: ShanayaTool[] = [
     },
   },
   {
+    name: "get_device_status",
+    description: "Read basic device platform, operating system, online state, and connection type. Does not access device identifiers or personal files.",
+    inputSchema: { type: "object", properties: {} },
+    execute: async () => {
+      const [info, network] = await Promise.all([Device.getInfo(), Network.getStatus()]);
+      return {
+        platform: info.platform,
+        operatingSystem: info.operatingSystem,
+        osVersion: info.osVersion,
+        isVirtual: info.isVirtual,
+        online: network.connected,
+        connectionType: network.connectionType,
+      };
+    },
+  },
+  {
     name: "get_battery_status",
     description: "Read the device battery percentage and charging status.",
     inputSchema: { type: "object", properties: {} },
@@ -137,6 +237,17 @@ const deviceTools: ShanayaTool[] = [
     },
   },
 ];
+
+function safeDocumentPath(value: unknown, allowRoot = false) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw && allowRoot) return "";
+  const path = raw.replaceAll("\\", "/");
+  const segments = path.split("/");
+  if (!path || path.startsWith("/") || /^[a-zA-Z]:/.test(path) || segments.some((segment) => !segment || segment === "." || segment === ".." || segment.includes("\0"))) {
+    throw new Error("Use a relative path inside Shanaya's app Documents area; parent and absolute paths are blocked.");
+  }
+  return segments.join("/");
+}
 
 export function getDeviceTools() {
   return deviceTools;

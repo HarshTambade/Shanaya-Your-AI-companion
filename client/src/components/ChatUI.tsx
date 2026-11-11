@@ -4,7 +4,7 @@ import { useBrowserLLM } from "use-browser-llm";
 import { useCallClient } from "@pinecall/ionic/react";
 import {
   ArrowUp, Bot, Cpu, Globe2, HardDrive, KeyRound, Laptop, LockKeyhole, Mic, Phone, PhoneOff,
-  RotateCcw, Settings2, Smartphone, Sparkles, Speaker, VolumeX, X,
+  RotateCcw, Settings2, Smartphone, Speaker, VolumeX, X,
 } from "lucide-react";
 import type { ChatMessage, Emotion, InferenceMode, SpeechLanguage } from "../types";
 import { useConnectivity } from "../services/connectivity";
@@ -83,9 +83,10 @@ function formatDuration(seconds: number) {
 
 type ChatUIProps = {
   onEmotionChange: (emotion: Emotion) => void;
+  panel?: boolean;
 };
 
-export default function ChatUI({ onEmotionChange }: ChatUIProps) {
+export default function ChatUI({ onEmotionChange, panel = false }: ChatUIProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<InferenceMode>("cloud");
@@ -93,7 +94,14 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
   const [cloudModel, setCloudModel] = useState("");
   const [cloudProvider, setCloudProvider] = useState("Groq");
   const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>("en-US");
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem("shanaya.voiceEnabled");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
   const [voiceStatus, setVoiceStatus] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -159,6 +167,14 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       // The server still supplies its default if storage is unavailable.
     }
   }, [cloudModel]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("shanaya.voiceEnabled", String(voiceEnabled));
+    } catch {
+      // Voice preference remains available for this session if storage is disabled.
+    }
+  }, [voiceEnabled]);
 
   const refreshNativeStatus = useCallback(async () => {
     if (!isNative) {
@@ -397,9 +413,14 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
     : effectiveMode === "native"
       ? nativeStatus === "available"
       : true;
+  const settingsPosition = panel
+    ? "absolute inset-x-2 top-14 bottom-[7.5rem] z-40 overflow-y-auto rounded-2xl border border-white/10 bg-[#111622]/[0.98] p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl"
+    : "absolute bottom-[calc(100%+0.5rem)] right-3 z-40 max-h-[min(75dvh,42rem)] w-[min(380px,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-white/10 bg-[#111622]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl md:right-[max(calc((100vw-42rem)/2),1rem)]";
 
   return (
-    <section className="relative mx-auto flex max-h-[48dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[26px] border border-white/10 bg-[#0b0e17]/75 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+    <section className={panel
+      ? "relative mx-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden rounded-[22px] border border-white/[0.09] bg-[#0b0e17]/90 shadow-[0_18px_70px_rgba(0,0,0,0.38)] backdrop-blur-2xl sm:rounded-[26px]"
+      : "relative mx-auto flex max-h-[48dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[26px] border border-white/10 bg-[#0b0e17]/75 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-2xl"}>
       <header className="flex shrink-0 items-center justify-between border-b border-white/[0.07] px-4 py-3 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet-300/20 bg-violet-400/[0.1] text-violet-200">
@@ -420,9 +441,10 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
             onClick={() => setIsSettingsOpen((open) => !open)}
             aria-expanded={isSettingsOpen}
             aria-label="Inference and privacy settings"
-            className="rounded-xl border border-white/[0.08] p-2.5 text-slate-300 transition hover:bg-white/[0.06]"
+            className="flex items-center gap-2 rounded-xl border border-white/[0.08] p-2.5 text-slate-300 transition hover:bg-white/[0.06]"
           >
             {isSettingsOpen ? <X size={15} /> : <Settings2 size={15} />}
+            {panel && <span className="hidden text-[10px] font-medium sm:inline">{isSettingsOpen ? "Close" : "Settings"}</span>}
           </button>
           <button
             type="button"
@@ -436,7 +458,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
         </div>
 
         {isSettingsOpen && (
-          <div className="absolute bottom-[calc(100%+0.5rem)] right-3 z-40 max-h-[min(75dvh,42rem)] w-[min(380px,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-white/10 bg-[#111622]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl md:right-[max(calc((100vw-42rem)/2),1rem)]">
+          <div className={settingsPosition}>
             <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-slate-300">
               <Cpu size={14} className="text-violet-300" /> Inference mode
             </div>
@@ -568,14 +590,14 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       )}
 
       <div ref={scrollRef} className="chat-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="mx-auto flex max-w-[580px] flex-col gap-3">
+        <div className="mx-auto flex max-w-[720px] flex-col gap-3">
           {messages.map((message, index) => {
             const isUser = message.role === "user";
             const isSystem = message.role === "system";
             if (isSystem) return <div key={`${index}-system`} role="status" className="mx-8 rounded-xl border border-emerald-300/10 bg-emerald-300/[0.035] px-3 py-2 text-[10px] leading-relaxed text-emerald-100/70">{message.content}</div>;
             return (
               <div key={`${index}-${message.role}`} className={`flex items-end gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
-                {!isUser && <div className="mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-violet-300/15 bg-violet-400/[0.08] text-violet-200"><Sparkles size={11} /></div>}
+                {!isUser && <div className="mb-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-violet-300/15 bg-violet-400/[0.08] text-violet-200"><Bot size={11} /></div>}
                 <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[12px] leading-relaxed ${isUser ? "rounded-br-md bg-gradient-to-br from-indigo-500 to-violet-600 text-white" : "rounded-bl-md border border-white/[0.05] bg-[#171b28]/85 text-slate-200"}`}>
                   {message.content}
                 </div>
@@ -622,7 +644,7 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
       )}
 
       <div className="shrink-0 border-t border-white/[0.07] p-2.5 md:p-3">
-        <div className="mx-auto flex max-w-[580px] items-center justify-between gap-2 px-1 pb-2">
+        <div className="mx-auto flex max-w-[720px] items-center justify-between gap-2 px-1 pb-2">
           <div className="flex min-w-0 items-center gap-2">
             <select
               value={speechLanguage}
@@ -667,8 +689,8 @@ export default function ChatUI({ onEmotionChange }: ChatUIProps) {
             <Phone size={12} /> Call
           </button>
         </div>
-        {voiceStatus && <p aria-live="polite" className="mx-auto mb-1 max-w-[580px] px-1 text-[10px] text-slate-500">{voiceStatus}</p>}
-        <form onSubmit={(event) => void submitMessage(event)} className="mx-auto flex max-w-[580px] items-end gap-2 rounded-2xl border border-white/[0.09] bg-[#111521]/90 p-1.5 transition focus-within:border-violet-400/40">
+        {voiceStatus && <p aria-live="polite" className="mx-auto mb-1 max-w-[720px] px-1 text-[10px] text-slate-500">{voiceStatus}</p>}
+        <form onSubmit={(event) => void submitMessage(event)} className="mx-auto flex max-w-[720px] items-end gap-2 rounded-2xl border border-white/[0.09] bg-[#111521]/90 p-1.5 transition focus-within:border-violet-400/40">
           <textarea
             ref={inputRef}
             value={input}

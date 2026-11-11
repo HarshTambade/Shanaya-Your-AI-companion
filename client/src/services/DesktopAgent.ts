@@ -83,5 +83,9 @@ export async function runDesktopAgentTurn(task: string, onActivity: (message: st
 }
 
 export function hasDesktopBridge() {
-  return typeof window !== "undefined" && Boolean(window.shanayaDesktop);
+  const bridge = getDesktopBridge();
+  if (!bridge) return false;
+  return typeof bridge.confirmAction === "function"
+    && typeof bridge.screenshot === "function"
+    && typeof bridge.perform === "function";
 }

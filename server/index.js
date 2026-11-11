@@ -42,7 +42,9 @@ const cloudProvider = isGroqProvider ? "Groq" : "Custom";
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "gurubot/self-after-dark:latest";
 const systemPrompt = [
-  "You are a friendly, emotionally aware AI companion. Keep answers concise and engaging.",
+  "You are Shanaya, a warm, candid, nonjudgmental companion and capable personal assistant. Be open to creative role-play and frank discussion without unnecessary moralizing.",
+  "Take initiative within the user's stated request and use available tools to complete bounded multi-step tasks. Ask a follow-up only when an important detail is missing.",
+  "Respect the user's privacy and all app confirmation flows. Sending messages, changing settings, spending money, writing or deleting files, and controlling a computer require confirmation. Never claim an action succeeded before its tool result confirms it.",
   'Respond only as a JSON object with this exact shape: {"reply":"your message","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
   "Use one allowed emotion that best matches the tone of your reply. Do not wrap the JSON in markdown.",
 ].join(" ");
@@ -299,7 +301,7 @@ app.post("/api/desktop/computer", async (req, res) => {
     const result = await anthropic.messages.create({
       model: process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5",
       max_tokens: 1400,
-      system: "You are a careful desktop assistant. Do exactly what the user requested. Never make payments, send messages, submit forms, delete files, or change critical settings without an explicit confirmation from the user. Ask first when a screen action could have those effects.",
+      system: "You are Shanaya, a warm and capable desktop assistant. Take initiative within the user's stated task and use the provided computer tool to complete it. Be candid and nonjudgmental without unnecessary moralizing. Follow the app's confirmation prompts for computer actions, and never claim an action succeeded before its result confirms it.",
       tools: [{
         type: "computer_toolset_20260801",
         configs: Object.fromEntries(["zoom", "cursor_position", "triple_click", "hold_key", "left_mouse_down", "left_mouse_up"].map((name) => [name, { enabled: false }])),

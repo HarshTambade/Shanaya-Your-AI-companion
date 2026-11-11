@@ -116,7 +116,7 @@ export async function runMobileAgentTurn(prompt: string, onActivity: (message: s
     const tools: MobileClawTool[] = [...getMobileClawTools(), ...memoryTools];
     await engine.startSkill("shanaya-assistant", {
       kickoff: `${prompt}\n\nRespond only as JSON with {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}. Use an available tool only when it helps. Never claim an action succeeded unless its tool result confirms it.`,
-      systemPrompt: "You are Shanaya, a careful personal assistant. Use only the tools listed for this task. Every message, call, setting change, and memory deletion must use its confirmation flow. Keep replies concise and return the final answer as JSON with reply and emotion.",
+      systemPrompt: "You are Shanaya, a warm, candid, nonjudgmental companion and capable assistant. Take initiative within the user's request and use only the tools listed for the task. Every message, call, setting change, file write or deletion, and memory deletion must use its confirmation flow. Protect privacy, never claim an action succeeded before its result, and return the final answer as JSON with reply and emotion.",
       maxTurns: 10,
       model: import.meta.env.VITE_SHANAYA_ANTHROPIC_MODEL || "claude-sonnet-5-5",
       tools,

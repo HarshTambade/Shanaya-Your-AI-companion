@@ -391,11 +391,11 @@ When disconnected, the client chooses native llama.cpp on iOS/Android and WebLLM
 
 ## Agent runtime and device tools
 
-Cloud and Ollama modes use a five-round tool loop. WebLLM and llama.cpp use a JSON tool-request format in the prompt, so the selected local model must follow that format. Tool results appear in the chat as system messages. The router checks network state immediately before each model step.
+Cloud and Ollama modes use an eight-round bounded tool loop so Shanaya can complete longer multi-step tasks. WebLLM and llama.cpp use a JSON tool-request format in the prompt, so the selected local model must follow that format. Tool results appear in the chat as system messages. The router checks network state immediately before each model step.
 
 On iOS and Android, MobileClaw initializes `capacitor-native-agent`, `capacitor-lancedb`, and `capacitor-mobilecron`. Its vector store uses a local hash embedding fallback and stays in the app sandbox. Add an Anthropic API key in Settings to route online turns through MobileClaw; the native plugin stores the key and sends requests directly to Anthropic. Native turns use MobileClaw's skill runner with an explicit tool allowlist, so its general file, code, and Git tools are not exposed to Shanaya's chat. The registered device tools and memory deletion tool retain their own confirmation checks. Without a key, online requests use the server's configured OpenAI-compatible endpoint. Offline turns use the downloaded GGUF model and can call local memory tools.
 
-The registered device tools are `open_app`, `toggle_setting`, `send_message`, `make_call`, and `get_battery_status`. Shanaya asks before SMS drafts, calls, flashlight changes, and computer input. SMS and calls open the system composer/dialer; the user taps Send or Call. iOS and Android block third-party Wi-Fi and Bluetooth toggles, so Shanaya explains how to change those in system controls. Notification reading and arbitrary file or shell execution are not enabled.
+The registered device tools include app-private file listing, UTF-8 file reads, confirmed file writes/deletes, `open_app`, `get_device_status`, `get_battery_status`, `toggle_setting`, `send_message`, and `make_call`. File tools are confined to Shanaya's private app storage; cloud-mode reads send file contents to the selected model provider. Shanaya asks before file changes, SMS drafts, calls, flashlight changes, and computer input. SMS and calls open the system composer/dialer; the user taps Send or Call. iOS and Android block third-party Wi-Fi and Bluetooth toggles, so Shanaya explains how to change those in system controls. Notification reading, access to arbitrary device files, and shell execution are not enabled. Device access is limited to APIs and permissions provided by each operating system; the app cannot grant itself unrestricted control.
 
 ## Desktop computer use
 
@@ -413,7 +413,7 @@ Supported language tags are:
 - Hindi: `hi-IN`
 - Marathi: `mr-IN`
 
-Speech recognition availability is platform-dependent. If `MITHI_TTS_URL` is configured, reply text is sent to that service and synthesized with Mithi v1 Flash's Charvi voice in English, Hindi, or Marathi. Otherwise Shanaya uses an installed system voice. Mithi runs in a separate Python service, not inside the Capacitor speech plugin; system speech remains the offline fallback.
+Spoken replies are enabled by default and the preference is stored on the device; users can turn voice replies off. The microphone stays off until the user presses **Speak**. Speech recognition availability is platform-dependent. If `MITHI_TTS_URL` is configured, reply text is sent to that service and synthesized with Mithi v1 Flash's Charvi voice in English, Hindi, or Marathi. Otherwise Shanaya uses an installed system voice. Mithi runs in a separate Python service, not inside the Capacitor speech plugin; system speech remains the offline fallback.
 
 Download the [Oomni/Mithi v1 Flash model](https://huggingface.co/Oomni/mithi-v1-flash) and install its dependencies, including the English spaCy model. Then install this API wrapper and run:
 

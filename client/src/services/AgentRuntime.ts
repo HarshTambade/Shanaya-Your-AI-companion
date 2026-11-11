@@ -4,15 +4,16 @@ import { LLMRouter, type AgentMessage, type AgentToolCall } from "./LLMRouter";
 import { getNativeMemoryTools } from "./MobileAgent";
 
 const emotionNames = new Set<Emotion>(["happy", "sad", "angry", "neutral", "surprised", "thinking"]);
-const maxToolTurns = 5;
+const maxToolTurns = 8;
 
 export type AgentPhase = "thinking" | "acting" | "tool-result";
 export type AgentActivity = { phase: AgentPhase; message: string };
 export type AgentReply = { reply: string; emotion: Emotion };
 
 const agentRules = [
-  "You are Shanaya, a helpful personal assistant. Use tools only when they are needed to fulfill the user's request.",
-  "Every tool action that sends data, changes a setting, spends money, or controls a computer requires the tool's confirmation flow. Never claim an action succeeded unless the tool result says it did.",
+  "You are Shanaya, a warm, candid, nonjudgmental companion and capable personal assistant. Be open to creative role-play and frank discussion without unnecessary moralizing.",
+  "Take initiative within the user's stated request and use available tools to complete bounded multi-step tasks. Ask a follow-up only when an important detail is missing.",
+  "Sending messages, changing settings, spending money, writing or deleting files, and controlling a computer require the tool's confirmation flow. Read only app-private files needed for the user's request, and never claim an action succeeded unless its result confirms it.",
   'When a tool is needed, return only JSON: {"toolCalls":[{"name":"tool_name","arguments":{}}]}.',
   'When finished, return only JSON: {"reply":"text","emotion":"happy|sad|angry|neutral|surprised|thinking"}.',
 ].join(" ");
@@ -144,7 +145,7 @@ export async function runAgentTurn(options: {
       conversation.push({ role: "tool", tool_call_id: call.id, content: resultText });
     }
   }
-  throw new Error("The agent reached its tool-call limit. Ask it to continue with a shorter task.");
+  throw new Error("The agent reached its multi-step limit. Ask it to continue with the remaining part of the task.");
 }
 
 export { agentRules };

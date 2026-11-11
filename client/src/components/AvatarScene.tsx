@@ -1,7 +1,7 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, OrbitControls, Stats, useAnimations, useGLTF, useProgress } from "@react-three/drei";
-import { Box3, FloatType, Group, HalfFloatType, MathUtils, Mesh, PerspectiveCamera, RedFormat, RGBAFormat, RGBFormat, RGFormat, Scene, Texture, Vector3 } from "three";
+import { Html, OrbitControls, useAnimations, useGLTF, useProgress } from "@react-three/drei";
+import { Box3, Group, MathUtils, Mesh, PerspectiveCamera, Vector3 } from "three";
 import { DRACOLoader } from "three-stdlib";
 import type { Emotion } from "../types";
 
@@ -23,27 +23,20 @@ const emotionLight: Record<Emotion, string> = {
   thinking: "#c084fc",
 };
 
-const emotionIcon: Record<Emotion, string> = {
-  happy: "✨",
-  sad: "💧",
-  angry: "🔥",
-  neutral: "✦",
-  surprised: "❕",
-  thinking: "💭",
-};
-
 const emotionPose: Record<Emotion, { lean: number; turn: number; tilt: number; bounce: number }> = {
-  happy: { lean: -0.025, turn: 0.08, tilt: -0.025, bounce: 0.09 },
-  sad: { lean: 0.09, turn: -0.04, tilt: 0.035, bounce: -0.04 },
-  angry: { lean: -0.035, turn: 0.025, tilt: -0.055, bounce: 0.015 },
+  happy: { lean: -0.045, turn: 0.14, tilt: -0.04, bounce: 0.13 },
+  sad: { lean: 0.14, turn: -0.08, tilt: 0.06, bounce: -0.07 },
+  angry: { lean: -0.06, turn: 0.05, tilt: -0.09, bounce: 0.02 },
   neutral: { lean: 0, turn: 0, tilt: 0, bounce: 0 },
-  surprised: { lean: -0.075, turn: 0, tilt: 0, bounce: 0.12 },
-  thinking: { lean: -0.025, turn: -0.16, tilt: 0.045, bounce: 0.01 },
+  surprised: { lean: -0.12, turn: 0, tilt: 0, bounce: 0.16 },
+  thinking: { lean: -0.04, turn: -0.22, tilt: 0.08, bounce: 0.015 },
 };
 
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath("/draco/");
 const avatarModelUrl = import.meta.env.VITE_AVATAR_MODEL_URL?.trim() || "/models/avatar.draco.glb";
+
+export type AvatarMotion = "loading" | "animation" | "procedural";
 
 function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   const aliases = emotionMorphs[emotion];
@@ -60,7 +53,7 @@ function applyEmotionMorph(scene: Group | Mesh, emotion: Emotion) {
   });
 }
 
-function Avatar({ emotion }: { emotion: Emotion }) {
+function Avatar({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void }) {
   const { scene, animations } = useGLTF(avatarModelUrl, false, false, (loader) => loader.setDRACOLoader(dracoLoader));
   const group = useRef<Group>(null);
   const model = useRef<Group>(null);
@@ -89,10 +82,11 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     const idleAnimation = animations.find((animation) => /idle|stand|breath/i.test(animation.name)) ?? animations[0];
     const firstAction = idleAnimation ? actions[idleAnimation.name] : undefined;
     firstAction?.reset().fadeIn(0.5).play();
+    onMotionChange?.(firstAction ? "animation" : "procedural");
     return () => {
       firstAction?.fadeOut(0.25);
     };
-  }, [actions, animations]);
+  }, [actions, animations, onMotionChange]);
 
   useFrame(({ clock }, delta) => {
     if (!group.current) return;
@@ -108,22 +102,21 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     const viewHeight = 2 * 5.4 * Math.tan((perspectiveCamera.fov * Math.PI) / 360);
     const aspect = size.width / Math.max(1, size.height);
     const viewWidth = viewHeight * aspect;
-    const heightFraction = Math.min(0.47, 390 / Math.max(1, size.height));
+    const heightFraction = Math.min(0.84, 900 / Math.max(1, size.height));
     const heightLimit = viewHeight * heightFraction;
     const widthLimit = viewWidth * 0.78 * (framing.sourceHeight / Math.max(framing.sourceWidth, 0.001));
     const fitScale = Math.min(heightLimit, widthLimit) / Math.max(framing.sourceHeight, 0.001);
-    const compactViewport = size.height < 700 || size.width < 560;
-
-    avatar.position.x = Math.sin(time * 0.42) * 0.065;
-    avatar.position.y = (compactViewport ? 0.72 : 0.52) + Math.sin(time * 1.25) * 0.055 + pose.bounce * pulse;
-    avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.52) * 0.035, 3.5, delta);
-    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.34) * 0.14, 2.8, delta);
-    avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.68) * 0.035, 3.5, delta);
+    avatar.position.x = Math.sin(time * 0.42) * 0.095;
+    const fittedAvatarHeight = fitScale * framing.sourceHeight;
+    avatar.position.y = 1.1 - fittedAvatarHeight / 2 + Math.sin(time * 1.25) * 0.075 + pose.bounce * pulse;
+    avatar.rotation.x = MathUtils.damp(avatar.rotation.x, pose.lean + Math.sin(time * 0.52) * 0.045, 3.5, delta);
+    avatar.rotation.y = MathUtils.damp(avatar.rotation.y, pose.turn + Math.sin(time * 0.34) * 0.19, 2.8, delta);
+    avatar.rotation.z = MathUtils.damp(avatar.rotation.z, pose.tilt + Math.sin(time * 0.68) * 0.045, 3.5, delta);
     const scale = 1 + (emotion === "surprised" ? 0.035 : 0.012) * pulse;
     avatar.scale.setScalar(MathUtils.damp(avatar.scale.x, scale, 4, delta));
 
     if (modelGroup) {
-      const breath = Math.sin(time * 1.8) * 0.012;
+      const breath = Math.sin(time * 1.8) * 0.016;
       const nextX = fitScale * (1 + breath * 0.5);
       const nextY = fitScale * (1 + breath);
       const nextZ = fitScale * (1 + breath * 0.5);
@@ -142,115 +135,8 @@ function Avatar({ emotion }: { emotion: Emotion }) {
     <group ref={group}>
       <group ref={model} position={framing.position}>
         <primitive object={scene} />
-        <Html position={[0.42, framing.sourceHeight * 0.9, 0.12]} center distanceFactor={7} zIndexRange={[20, 0]}>
-          <div key={emotion} className="avatar-emotion-bubble" aria-label={`Shanaya feels ${emotion}`} title={emotion}>
-            {emotionIcon[emotion]}
-          </div>
-        </Html>
       </group>
     </group>
-  );
-}
-
-const drawCallBudget = 150;
-const textureCountBudget = 64;
-const textureMemoryBudgetBytes = 128 * 1024 * 1024;
-
-function estimateTextureMemory(scene: Scene) {
-  const textures = new Set<Texture>();
-  const textureSlots = [
-    "map", "alphaMap", "aoMap", "bumpMap", "displacementMap", "emissiveMap", "envMap",
-    "lightMap", "metalnessMap", "normalMap", "roughnessMap", "specularMap",
-  ];
-
-  if (scene.environment?.isTexture) textures.add(scene.environment);
-  const backgroundTexture = scene.background as Texture | null;
-  if (backgroundTexture?.isTexture) textures.add(backgroundTexture);
-  scene.traverse((object) => {
-    const mesh = object as Mesh;
-    if (!mesh.isMesh) return;
-    for (const material of (Array.isArray(mesh.material) ? mesh.material : [mesh.material])) {
-      for (const slot of textureSlots) {
-        const texture = (material as unknown as Record<string, unknown>)[slot] as Texture | undefined;
-        if (texture?.isTexture) textures.add(texture);
-      }
-    }
-  });
-
-  let bytes = 0;
-  for (const texture of textures) {
-    const mipmaps = texture.mipmaps as Array<{ data?: ArrayBufferView }> | undefined;
-    const mipmapBytes = mipmaps?.reduce((sum, mipmap) => {
-      const data = mipmap.data;
-      return sum + (data?.byteLength ?? 0);
-    }, 0) ?? 0;
-    if (mipmapBytes > 0) {
-      bytes += mipmapBytes;
-      continue;
-    }
-
-    const estimateImageBytes = (image: unknown): number => {
-      if (Array.isArray(image)) return image.reduce((sum, face) => sum + estimateImageBytes(face), 0);
-      if (!image || typeof image !== "object") return 0;
-      const size = image as { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number; videoWidth?: number; videoHeight?: number };
-      const width = size.width ?? size.naturalWidth ?? size.videoWidth ?? 0;
-      const height = size.height ?? size.naturalHeight ?? size.videoHeight ?? 0;
-      if (!width || !height) return 0;
-      const components = texture.format === RGBAFormat ? 4 : texture.format === RGBFormat ? 3 : texture.format === RGFormat ? 2 : texture.format === RedFormat ? 1 : 4;
-      const bytesPerComponent = texture.type === FloatType ? 4 : texture.type === HalfFloatType ? 2 : 1;
-      const mipFactor = texture.generateMipmaps ? 4 / 3 : 1;
-      return width * height * components * bytesPerComponent * mipFactor;
-    };
-    bytes += estimateImageBytes(texture.image);
-  }
-  return bytes;
-}
-
-function RendererBudgetMonitor() {
-  const gl = useThree((state) => state.gl);
-  const scene = useThree((state) => state.scene);
-  const [metrics, setMetrics] = useState({ calls: 0, textures: 0, textureBytes: 0 });
-  const overDrawBudget = useRef(false);
-  const overTextureBudget = useRef(false);
-  const overMemoryBudget = useRef(false);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const calls = gl.info.render.calls;
-      const textures = gl.info.memory.textures;
-      const textureBytes = estimateTextureMemory(scene);
-      setMetrics({ calls, textures, textureBytes });
-
-      if (calls > drawCallBudget && !overDrawBudget.current) {
-        console.warn(`[avatar] Draw-call budget exceeded (${calls}/${drawCallBudget}).`);
-        overDrawBudget.current = true;
-      } else if (calls <= drawCallBudget) {
-        overDrawBudget.current = false;
-      }
-      if (textures > textureCountBudget && !overTextureBudget.current) {
-        console.warn(`[avatar] Texture-count budget exceeded (${textures}/${textureCountBudget}).`);
-        overTextureBudget.current = true;
-      } else if (textures <= textureCountBudget) {
-        overTextureBudget.current = false;
-      }
-      if (textureBytes > textureMemoryBudgetBytes && !overMemoryBudget.current) {
-        console.warn(`[avatar] Estimated texture-memory budget exceeded (${(textureBytes / (1024 * 1024)).toFixed(1)} MiB/${textureMemoryBudgetBytes / (1024 * 1024)} MiB).`);
-        overMemoryBudget.current = true;
-      } else if (textureBytes <= textureMemoryBudgetBytes) {
-        overMemoryBudget.current = false;
-      }
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [gl, scene]);
-
-  return (
-    <Html fullscreen zIndexRange={[5, 0]}>
-      <div className="pointer-events-none absolute right-3 top-3 rounded-lg border border-white/10 bg-slate-950/75 px-2.5 py-2 font-mono text-[9px] leading-relaxed text-slate-300 shadow-lg backdrop-blur">
-        <div>DRAW CALLS&nbsp; {metrics.calls} / {drawCallBudget}</div>
-        <div>TEXTURES&nbsp;&nbsp;&nbsp;&nbsp; {metrics.textures} / {textureCountBudget}</div>
-        <div>TEXTURE MEM&nbsp; {(metrics.textureBytes / (1024 * 1024)).toFixed(1)} / {textureMemoryBudgetBytes / (1024 * 1024)} MiB</div>
-      </div>
-    </Html>
   );
 }
 
@@ -268,7 +154,7 @@ function SceneLoader() {
   );
 }
 
-export default function AvatarScene({ emotion }: { emotion: Emotion }) {
+export default function AvatarScene({ emotion, onMotionChange }: { emotion: Emotion; onMotionChange?: (motion: AvatarMotion) => void }) {
   return (
     <div className="relative h-full w-full">
       <Canvas
@@ -282,9 +168,8 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
         <directionalLight position={[-4, 2, -3]} intensity={2.2} color="#a6a5ff" />
         <pointLight position={[0, 1.8, 2.5]} intensity={0.95} color={emotionLight[emotion]} />
         <Suspense fallback={<SceneLoader />}>
-          <Avatar emotion={emotion} />
+          <Avatar emotion={emotion} onMotionChange={onMotionChange} />
         </Suspense>
-        {import.meta.env.DEV && <><Stats /> <RendererBudgetMonitor /></>}
         <OrbitControls
           target={[0, 1.1, 0]}
           enablePan={false}
@@ -296,14 +181,6 @@ export default function AvatarScene({ emotion }: { emotion: Emotion }) {
           maxPolarAngle={Math.PI / 1.9}
         />
       </Canvas>
-      <div
-        aria-label={`Avatar emotion: ${emotion}`}
-        title={`Shanaya is feeling ${emotion}`}
-        className="pointer-events-none absolute right-4 top-20 z-10 flex items-center gap-2 rounded-full border border-white/10 bg-[#101522]/80 px-3 py-2 text-xs capitalize text-slate-200 shadow-lg backdrop-blur-md md:right-7 md:top-24"
-      >
-        <span className="text-sm" aria-hidden="true">{emotionIcon[emotion]}</span>
-        <span>{emotion}</span>
-      </div>
     </div>
   );
 }

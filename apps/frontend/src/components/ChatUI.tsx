@@ -39,7 +39,14 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [language, setLanguage] = useState<SpeechLanguage>("en-US");
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem("shanaya.voiceEnabled");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -53,6 +60,14 @@ export default function ChatUI({ onEmotionChange }: { onEmotionChange: (emotion:
   const effectiveLocalMode = mode === "local" || !online;
   const localLLM = useBrowserLLM((effectiveLocalMode || fallbackRequested) && !isNative ? WEBLLM_MODEL : undefined);
   const localStatusRef = useRef<string>(localLLM.status as string);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("shanaya.voiceEnabled", String(voiceEnabled));
+    } catch {
+      // Keep the voice preference for this session if storage is disabled.
+    }
+  }, [voiceEnabled]);
   const localWaiters = useRef<LocalWaiter[]>([]);
   const localModelReady = isNative ? nativeModelStatus === "available" : localLLM.status === "ready";
   const models = flattenModels(catalog);
