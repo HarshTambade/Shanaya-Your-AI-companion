@@ -381,15 +381,29 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-const server = app.listen(port, () => {
-  console.log(`Shanaya API listening on http://localhost:${port}`);
-});
-
-server.on("error", (error) => {
-  if (error.code === "EADDRINUSE") {
-    console.error(`Shanaya API could not start: port ${port} is already in use. Stop the existing process or set PORT to another value.`);
-  } else {
-    console.error("Shanaya API could not start:", error);
+async function startServer() {
+  const mcpEnabled = process.env.MCP_ENABLED === "true";
+  if (mcpEnabled) {
+    const { mountShanayaMcpEndpoint } = await import("./mcp-http.mjs");
+    mountShanayaMcpEndpoint(app, process.env.MCP_API_TOKEN);
   }
+
+  const server = app.listen(port, () => {
+    console.log(`Shanaya API listening on http://localhost:${port}`);
+    if (mcpEnabled) console.log(`Shanaya MCP endpoint enabled at http://localhost:${port}/mcp`);
+  });
+
+  server.on("error", (error) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(`Shanaya API could not start: port ${port} is already in use. Stop the existing process or set PORT to another value.`);
+    } else {
+      console.error("Shanaya API could not start:", error);
+    }
+    process.exitCode = 1;
+  });
+}
+
+startServer().catch((error) => {
+  console.error("Shanaya API could not start:", error);
   process.exitCode = 1;
 });

@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { Download, ExternalLink } from "lucide-react";
 
-const releasesUrl = "https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases";
+const buildsUrl = "https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml";
 
 const platforms = [
-  { name: "Android", packageType: "APK · latest release", href: import.meta.env.VITE_ANDROID_DOWNLOAD_URL },
+  { name: "Android", packageType: "APK · GitHub Release or build artifact", href: import.meta.env.VITE_ANDROID_DOWNLOAD_URL },
   { name: "iOS", packageType: "Signed IPA · TestFlight / App Store", href: import.meta.env.VITE_IOS_DOWNLOAD_URL },
-  { name: "macOS", packageType: "DMG · latest release", href: import.meta.env.VITE_MACOS_DOWNLOAD_URL },
-  { name: "Windows", packageType: "EXE · latest release", href: import.meta.env.VITE_WINDOWS_DOWNLOAD_URL },
-  { name: "Linux", packageType: "AppImage / DEB · latest release", href: import.meta.env.VITE_LINUX_DOWNLOAD_URL },
+  { name: "macOS", packageType: "DMG · GitHub Release or build artifact", href: import.meta.env.VITE_MACOS_DOWNLOAD_URL },
+  { name: "Windows", packageType: "EXE · GitHub Release or build artifact", href: import.meta.env.VITE_WINDOWS_DOWNLOAD_URL },
+  { name: "Linux", packageType: "AppImage / DEB · GitHub Release or build artifact", href: import.meta.env.VITE_LINUX_DOWNLOAD_URL },
 ];
 
 export default function PlatformDownloads() {
@@ -40,7 +40,7 @@ export default function PlatformDownloads() {
               <a
                 key={platform.name}
                 role="menuitem"
-                href={platform.href?.trim() || releasesUrl}
+                href={platform.href?.trim() || buildsUrl}
                 target="_blank"
                 rel="noreferrer"
                 onClick={() => setIsOpen(false)}
@@ -57,7 +57,7 @@ export default function PlatformDownloads() {
             ))}
           </div>
           <p className="mt-2 border-t border-white/[0.07] px-2 pt-2 text-[10px] leading-relaxed text-slate-500">
-            Platform builds are attached to GitHub Releases when a version tag is published. iOS requires Apple signing and TestFlight or App Store distribution; unsigned CI builds are archives only.
+            Versioned installers are attached to GitHub Releases after a <code className="text-slate-300">v*</code> tag build. Until the first release exists, this link opens GitHub Actions so you can download the latest successful build artifact. iOS requires Apple signing and TestFlight or App Store distribution.
           </p>
         </div>
       )}

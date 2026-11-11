@@ -10,6 +10,7 @@
     "models:draco": "npm run models:draco --prefix client",
     "dev:python-fallback": "python3 -m backend.run",
     "dev:with-python-fallback": "concurrently -k -n server,client,python -c magenta,cyan,green \"npm run dev:server\" \"npm run dev:client\" \"npm run dev:python-fallback\"",
+    "mcp:stdio": "npm run mcp:stdio --prefix server",
     "dev:ebpf": "sudo python3 ebpf/loader.py"
   },
   "devDependencies": {

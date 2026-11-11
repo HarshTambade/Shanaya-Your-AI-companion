@@ -24,7 +24,7 @@ Shanaya is a source-available AI companion built for natural conversation across
   <a href="https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases"><img alt="Linux package downloads" src="https://img.shields.io/badge/Linux-AppImage%20%2F%20DEB-FCC624?logo=linux&logoColor=black"></a>
 </p>
 
-These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`.
+These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/releases), where versioned installers are published after a `v*` tag build succeeds. Until the first release exists, use the [GitHub Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) to open a successful run and download its platform artifact. The in-app **Downloads** menu supports direct installer or store URLs through `VITE_ANDROID_DOWNLOAD_URL`, `VITE_IOS_DOWNLOAD_URL`, `VITE_MACOS_DOWNLOAD_URL`, `VITE_WINDOWS_DOWNLOAD_URL`, and `VITE_LINUX_DOWNLOAD_URL`; blank values now fall back to the Actions page rather than an empty Releases page.
 
 **iOS note:** A signed build exports an IPA, but installing on iPhone or iPad still requires TestFlight, the App Store, or another Apple-approved distribution method. Without Apple signing credentials, CI provides an Xcode archive for developers instead.
 
@@ -42,6 +42,7 @@ These links open [GitHub Releases](https://github.com/HarshTambade/Shanaya---You
 - [Configuration](#configuration)
 - [Inference modes](#inference-modes)
 - [Agent runtime and device tools](#agent-runtime-and-device-tools)
+- [MCP integration](#mcp-integration)
 - [Desktop computer use](#desktop-computer-use)
 - [Voice and calls](#voice-and-calls)
 - [Mobile and PWA builds](#mobile-and-pwa-builds)
@@ -88,6 +89,8 @@ flowchart TD
     Client --> Local{"Local or offline route"}
     Client --> Vercel["Vercel public routing"]
     Vercel --> API["Server service<br/>Express API"]
+    MCPClient["MCP-capable apps"] --> MCP["Shanaya MCP<br/>stdio / Streamable HTTP"]
+    MCP --> API
     Local --> WebLLM["WebLLM + WebGPU"]
     Local --> Llama["llama.cpp + GGUF<br/>iOS / Android"]
     Local --> NativeAgent["MobileClaw + LanceDB + MobileCron<br/>iOS / Android"]
@@ -111,10 +114,11 @@ The root [`vercel.json`](./vercel.json) defines two services in one Vercel proje
 ```text
 Incoming request
 ├── /api/*  ──> server service (Express)
+├── /mcp    ──> server service (MCP Streamable HTTP, when enabled)
 └── /*      ──> client service (Vite static output)
 ```
 
-The `client` service is public at `/`. The `server` service is internal by default and is exposed only through the `/api/*` rewrite. No service binding is required: the browser uses relative `/api/*` URLs, while the API calls external providers directly. If a future service calls another internal Vercel service, add a service binding to the calling service and read the injected environment variable at function runtime.
+The `client` service is public at `/`. The server handles `/api/*`; its `/mcp` route is available only when MCP is enabled and requires the configured bearer token. No service binding is required: the browser uses relative `/api/*` URLs, while the API calls external providers directly. If a future service calls another internal Vercel service, add a service binding to the calling service and read the injected environment variable at function runtime.
 
 ### Responsibilities by layer
 
@@ -129,6 +133,7 @@ The `client` service is public at `/`. The `server` service is internal by defau
 | AI services | [`client/src/services/AIService.ts`](./client/src/services/AIService.ts) | Handles native GGUF download, llama.cpp initialization, offline generation, and network-aware routing. |
 | Speech services | [`client/src/services/SpeechService.ts`](./client/src/services/SpeechService.ts) and [`client/src/services/VoiceService.ts`](./client/src/services/VoiceService.ts) | Provides speech synthesis and speech recognition integrations. |
 | API boundary | [`server/index.js`](./server/index.js) | Validates chat requests, calls cloud/Ollama providers, normalizes model output, and issues Pinecall token requests. |
+| Integration boundary | [`server/mcp-core.mjs`](./server/mcp-core.mjs), [`server/mcp-http.mjs`](./server/mcp-http.mjs), and [`server/mcp-stdio.mjs`](./server/mcp-stdio.mjs) | Exposes Shanaya to MCP clients over local stdio or token-protected Streamable HTTP. |
 | Packaging | [`client/capacitor.config.ts`](./client/capacitor.config.ts) and [`client/vite.config.ts`](./client/vite.config.ts) | Defines native app identity, PWA behavior, caching, and development proxying. |
 
 ## How a message works
@@ -344,6 +349,9 @@ Set the Python fallback's provider key in the root `.env`, then start all three 
 | --- | --- | --- | --- |
 | `PORT` | No | `3001` | Express API port. |
 | `CLIENT_ORIGIN` | No | Local origins | Comma-separated CORS allowlist. |
+| `MCP_ENABLED` | No | `false` | Set to `true` to mount the remote `/mcp` Streamable HTTP endpoint. |
+| `MCP_API_TOKEN` | Required when remote MCP is enabled | — | Random bearer token of at least 32 characters. Never place it in client code. |
+| `SHANAYA_API_URL` | No | `http://127.0.0.1:3001` | Shanaya API origin used by the MCP stdio server and tools. |
 | `GROQ_API_KEY` | For default cloud mode | — | Server-side Groq key. `CLOUD_API_KEY` remains available for compatible providers. |
 | `GROQ_API_URL` | No | Groq chat completions endpoint | Optional Groq-compatible endpoint override. `CLOUD_API_URL` can select another compatible provider. |
 | `GROQ_MODEL` | No | `openai/gpt-oss-120b` | Primary cloud model. |
@@ -394,6 +402,44 @@ Cloud and Ollama modes use an eight-round bounded tool loop so Shanaya can compl
 On iOS and Android, MobileClaw initializes `capacitor-native-agent`, `capacitor-lancedb`, and `capacitor-mobilecron`. Its vector store uses a local hash embedding fallback and stays in the app sandbox. Add an Anthropic API key in Settings to route online turns through MobileClaw; the native plugin stores the key and sends requests directly to Anthropic. Native turns use MobileClaw's skill runner with an explicit tool allowlist, so its general file, code, and Git tools are not exposed to Shanaya's chat. The registered device tools and memory deletion tool retain their own confirmation checks. Without a key, online requests use the server's configured OpenAI-compatible endpoint. Offline turns use the downloaded GGUF model and can call local memory tools.
 
 The registered device tools include app-private file listing, UTF-8 file reads, confirmed file writes/deletes, `open_app`, `get_device_status`, `get_battery_status`, `toggle_setting`, `send_message`, and `make_call`. File tools are confined to Shanaya's private app storage; cloud-mode reads send file contents to the selected model provider. Shanaya asks before file changes, SMS drafts, calls, flashlight changes, and computer input. SMS and calls open the system composer/dialer; the user taps Send or Call. iOS and Android block third-party Wi-Fi and Bluetooth toggles, so Shanaya explains how to change those in system controls. Notification reading, access to arbitrary device files, and shell execution are not enabled. Device access is limited to APIs and permissions provided by each operating system; the app cannot grant itself unrestricted control.
+
+## MCP integration
+
+Shanaya includes a Model Context Protocol server so an MCP-capable host can call her chat service as a tool. It uses the same Express API, Groq-first model routing, and server-side credentials as the app. Install server dependencies with `npm install --prefix server`.
+
+The server exposes these tools:
+
+| MCP tool | Purpose |
+| --- | --- |
+| `shanaya_chat` | Send Shanaya a prompt, optional recent user/assistant history, and optional `cloud` or `ollama` mode. Returns `{ "reply": "…", "emotion": "…" }`. |
+| `shanaya_status` | Check API/provider readiness without revealing credentials. |
+| `shanaya_models` | List configured model IDs and the default model. |
+
+### Local desktop and IDE clients (stdio)
+
+Start Shanaya's API with `npm run dev:server`, then add this server entry to the MCP host's configuration. Replace the path with the absolute path to this checkout:
+
+```json
+{
+  "mcpServers": {
+    "shanaya": {
+      "command": "node",
+      "args": ["/absolute/path/to/Shanaya/server/mcp-stdio.mjs"],
+      "env": {
+        "SHANAYA_API_URL": "http://127.0.0.1:3001"
+      }
+    }
+  }
+}
+```
+
+The stdio process speaks MCP on standard input/output and calls the running Shanaya API. It exposes chat/status/model tools only; it does not inherit the host app's account credentials or gain access to that app's data.
+
+### Remote or web clients (Streamable HTTP)
+
+For a deployed server, set `MCP_ENABLED=true` and set `MCP_API_TOKEN` to a unique secret generated with `openssl rand -hex 32`. Set `SHANAYA_API_URL` to the reachable API origin; the `127.0.0.1` default is for local development. Deploy behind HTTPS, and configure the host app to connect to `https://your-domain.example/mcp` with `Authorization: Bearer <your-token>`. Remote hosts must support a custom bearer header; hosts that require OAuth discovery need an OAuth gateway in front of Shanaya. Web-based hosts also need their origin listed in `CLIENT_ORIGIN`. Keep the token in the MCP host's server-side secret configuration; never embed it in browser JavaScript or a `VITE_*` variable. The endpoint rejects requests without a valid token and stays disabled by default.
+
+Any software can use Shanaya through this interface when it has an MCP client or can implement the MCP Streamable HTTP/stdio protocol. MCP does not automatically connect Shanaya to every app: the other app must expose an MCP server or provide its own integration, and its permissions remain controlled by that app. The current Shanaya MCP server does not expose shell, file, account, messaging, or computer-control tools. Use `CLIENT_ORIGIN` to explicitly allow browser origins; keep remote access on HTTPS.
 
 ## Desktop computer use
 
@@ -495,7 +541,7 @@ For a physical phone, `localhost` means the phone itself. Use a reachable HTTPS 
 
 ### Build artifacts and installation
 
-The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build also publishes a GitHub Release with stable platform package names:
+The GitHub Actions workflow builds the web, mobile, and Electron targets on pull requests, pushes to `main`, version tags, and manual runs. Every successful `v*` tag build also publishes a GitHub Release with stable platform package names. The repository currently has no release until the first version tag is pushed:
 
 | Platform | Release asset | Format and installation notes |
 | --- | --- | --- |
@@ -512,6 +558,8 @@ Create and push a version tag to build and publish installers:
 git tag v1.0.1
 git push origin v1.0.1
 ```
+
+For development builds, use the [Actions build page](https://github.com/HarshTambade/Shanaya---Your-AI-companion-/actions/workflows/build.yml) and download artifacts from a successful run.
 
 The in-app Downloads menu opens the Releases page by default. Set platform URL variables in `client/.env` to point to store listings or direct installer URLs when desired. Vite embeds these links at build time, so rebuild the client after changing them.
 
@@ -572,7 +620,7 @@ This repository is configured as a Vercel multi-service project:
 | Service | Root | Framework | Install | Build/output | Traffic |
 | --- | --- | --- | --- | --- | --- |
 | `client` | `client` | Vite | `npm install --ignore-scripts` | `npm run build` → `dist` | Public at `/` |
-| `server` | `server` | Express | `npm install` | Vercel Express detection | Public only through `/api/*` |
+| `server` | `server` | Express | `npm install` | Vercel Express detection | Public through `/api/*` and `/mcp` |
 
 The client uses `npm install --ignore-scripts` because a transitive Eliza package currently publishes a lifecycle script that references a missing `scripts/ensure-platform-deps.mjs` file. The application does not depend on that lifecycle action. Keep this workaround in sync with CI until the upstream package is corrected or replaced.
 
@@ -582,7 +630,8 @@ To deploy:
 2. Use the root directory containing [`vercel.json`](./vercel.json).
 3. Configure client variables such as `VITE_PINECALL_AGENT_ID` and `VITE_API_BASE_URL` only when an external API origin is required. With the configured rewrites, leave `VITE_API_BASE_URL` empty so the browser uses the same-domain `/api` route.
 4. Configure server secrets such as `CLOUD_API_URL`, `CLOUD_API_KEY`, `OLLAMA_BASE_URL`, `PINECALL_TOKEN_URL`, and optional TTS variables in the server service environment.
-5. Deploy and verify:
+5. To enable remote MCP, also set `MCP_ENABLED=true`, `MCP_API_TOKEN` to a generated secret, `SHANAYA_API_URL` to the public API origin, and add the MCP host web origin to `CLIENT_ORIGIN`.
+6. Deploy and verify:
 
    ```bash
    curl https://your-domain.example/api/health
@@ -654,6 +703,10 @@ Returns:
 {"status":"ok"}
 ```
 
+### `POST /mcp` (optional)
+
+When `MCP_ENABLED=true`, the Express server exposes an MCP Streamable HTTP endpoint at `/mcp`. Each request must include `Authorization: Bearer <MCP_API_TOKEN>`. The endpoint advertises `shanaya_chat`, `shanaya_status`, and `shanaya_models`. It is disabled by default; local stdio clients can instead launch `server/mcp-stdio.mjs`.
+
 ### `POST /api/chat`
 
 Request:
@@ -720,6 +773,9 @@ Fetches credentials from the configured trusted Pinecall token issuer. It return
 ├── server/
 │   ├── .env.example                  # Server configuration template
 │   ├── index.js                     # Express API, agent router, desktop and TTS proxies
+│   ├── mcp-core.mjs                 # Shared MCP tools and Shanaya API bridge
+│   ├── mcp-http.mjs                 # Authenticated Streamable HTTP transport
+│   ├── mcp-stdio.mjs                # Local MCP stdio transport
 │   ├── mithi_tts_service.py         # Optional Charvi TTS service wrapper
 │   └── package.json                  # Server scripts/dependencies
 ├── package.json                     # Root orchestration scripts
